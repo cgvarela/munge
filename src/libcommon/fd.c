@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -49,10 +49,6 @@
  *****************************************************************************/
 
 static int _fd_get_poll_timeout (const struct timeval *when);
-
-static int _fd_get_lock (int fd, int cmd, int type);
-
-static pid_t _fd_test_lock (int fd, int type);
 
 
 /*****************************************************************************
@@ -435,59 +431,6 @@ fd_is_nonblocking (int fd)
 
 
 /*****************************************************************************
- *  Public Functions for Locking
- *****************************************************************************/
-
-int
-fd_get_read_lock (int fd)
-{
-    return (_fd_get_lock (fd, F_SETLK, F_RDLCK));
-}
-
-
-int
-fd_get_readw_lock (int fd)
-{
-    return (_fd_get_lock (fd, F_SETLKW, F_RDLCK));
-}
-
-
-int
-fd_get_write_lock (int fd)
-{
-    return (_fd_get_lock (fd, F_SETLK, F_WRLCK));
-}
-
-
-int
-fd_get_writew_lock (int fd)
-{
-    return (_fd_get_lock (fd, F_SETLKW, F_WRLCK));
-}
-
-
-int
-fd_release_lock (int fd)
-{
-    return (_fd_get_lock (fd, F_SETLK, F_UNLCK));
-}
-
-
-pid_t
-fd_is_read_lock_blocked (int fd)
-{
-    return (_fd_test_lock (fd, F_RDLCK));
-}
-
-
-pid_t
-fd_is_write_lock_blocked (int fd)
-{
-    return (_fd_test_lock (fd, F_WRLCK));
-}
-
-
-/*****************************************************************************
  *  Private Functions
  *****************************************************************************/
 
@@ -522,42 +465,4 @@ _fd_get_poll_timeout (const struct timeval *when)
      *  Return 0 if [when] is in the past to indicate poll() should not block.
      */
     return ((msecs < 0) ? 0 : msecs);
-}
-
-
-static int
-_fd_get_lock (int fd, int cmd, int type)
-{
-    struct flock lock;
-
-    assert (fd >= 0);
-
-    lock.l_type = type;
-    lock.l_start = 0;
-    lock.l_whence = SEEK_SET;
-    lock.l_len = 0;
-
-    return (fcntl (fd, cmd, &lock));
-}
-
-
-static pid_t
-_fd_test_lock (int fd, int type)
-{
-    struct flock lock;
-
-    assert (fd >= 0);
-
-    lock.l_type = type;
-    lock.l_start = 0;
-    lock.l_whence = SEEK_SET;
-    lock.l_len = 0;
-
-    if (fcntl (fd, F_GETLK, &lock) < 0) {
-        return (-1);
-    }
-    if (lock.l_type == F_UNLCK) {
-        return (0);
-    }
-    return (lock.l_pid);
 }

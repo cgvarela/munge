@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -58,6 +58,13 @@
 #ifndef MIN
 #  define MIN(a,b) ((a <= b) ? (a) : (b))
 #endif /* !MIN */
+
+#include <stdint.h>
+#include <unistd.h>
+#define UID_MAXIMUM     (UINT32_MAX - 1)
+#define UID_SENTINEL    ((uid_t) -1)
+#define GID_MAXIMUM     (UINT32_MAX - 1)
+#define GID_SENTINEL    ((gid_t) -1)
 
 
 #endif /* !MUNGE_COMMON_H */

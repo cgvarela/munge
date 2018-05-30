@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -26,31 +26,27 @@
  *****************************************************************************/
 
 
-#ifndef XGETPWNAM_H
-#define XGETPWNAM_H
+#ifndef MUNGE_QUERY_H
+#define MUNGE_QUERY_H
 
-#include <pwd.h>
-#include <stddef.h>
-
-
-/*****************************************************************************
- *  Data Types
- *****************************************************************************/
-
-typedef struct xpwbuf_t * xpwbuf_p;
+#include <unistd.h>
 
 
-/*****************************************************************************
- *  Functions
- *****************************************************************************/
+int query_uid (const char *user, uid_t *uid_ptr);
+/*
+ *  Queries for the User ID using the [user] string which can specify the
+ *    user name or UID number.
+ *  Returns 0 on success with the UID stored at [uid_ptr] (if non-NULL).
+ *    Returns -1 on error without updating [uid_ptr].
+ */
 
-xpwbuf_p xgetpwnam_buf_create (size_t len);
+int query_gid (const char *group, gid_t *gid_ptr);
+/*
+ *  Queries for the Group ID using the [group] string which can specify the
+ *    group name or GID number.
+ *  Returns 0 on success with the GID stored at [gid_ptr] (if non-NULL).
+ *    Returns -1 on error without updating [gid_ptr].
+ */
 
-void xgetpwnam_buf_destroy (xpwbuf_p pwbufp);
 
-size_t xgetpwnam_buf_get_len (xpwbuf_p pwbufp);
-
-int xgetpwnam (const char *user, struct passwd *pwp, xpwbuf_p pwbufp);
-
-
-#endif /* !XGETPWNAM_H */
+#endif /* !MUNGE_QUERY_H */

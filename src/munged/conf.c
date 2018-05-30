@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -35,16 +35,20 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <munge.h>
 #include <netdb.h>                      /* for gethostbyname() */
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/param.h>                  /* for MAXHOSTNAMELEN */
 #include <sys/socket.h>                 /* for AF_INET */
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #include "conf.h"
 #include "license.h"
+#include "lock.h"
 #include "log.h"
 #include "md.h"
 #include "missing.h"                    /* for inet_ntop() */
@@ -64,41 +68,57 @@
 #define OPT_NUM_THREADS         258
 #define OPT_AUTH_SERVER         259
 #define OPT_AUTH_CLIENT         260
-#define OPT_BENCHMARK           264
 #define OPT_GROUP_CHECK         261
 #define OPT_GROUP_UPDATE        262
 #define OPT_SYSLOG              263
-#define OPT_LAST                265
+#define OPT_BENCHMARK           264
+#define OPT_MAX_TTL             265
+#define OPT_PID_FILE            266
+#define OPT_LOG_FILE            267
+#define OPT_SEED_FILE           268
+#define OPT_TRUSTED_GROUP       269
+#define OPT_LAST                270
 
-const char * const short_opts = ":hLVfFMS:";
+const char * const short_opts = ":hLVfFMsS:v";
 
 #include <getopt.h>
 struct option long_opts[] = {
-    { "help",              no_argument,       NULL, 'h'              },
-    { "license",           no_argument,       NULL, 'L'              },
-    { "version",           no_argument,       NULL, 'V'              },
-    { "force",             no_argument,       NULL, 'f'              },
-    { "foreground",        no_argument,       NULL, 'F'              },
-    { "mlockall",          no_argument,       NULL, 'M'              },
-    { "socket",            required_argument, NULL, 'S'              },
-    { "advice",            no_argument,       NULL, OPT_ADVICE       },
-    { "key-file",          required_argument, NULL, OPT_KEY_FILE     },
-    { "num-threads",       required_argument, NULL, OPT_NUM_THREADS  },
+    { "help",              no_argument,       NULL, 'h'               },
+    { "license",           no_argument,       NULL, 'L'               },
+    { "version",           no_argument,       NULL, 'V'               },
+    { "force",             no_argument,       NULL, 'f'               },
+    { "foreground",        no_argument,       NULL, 'F'               },
+    { "mlockall",          no_argument,       NULL, 'M'               },
+    { "stop",              no_argument,       NULL, 's'               },
+    { "socket",            required_argument, NULL, 'S'               },
+    { "verbose",           no_argument,       NULL, 'v'               },
+    { "advice",            no_argument,       NULL, OPT_ADVICE        },
 #if defined(AUTH_METHOD_RECVFD_MKFIFO) || defined(AUTH_METHOD_RECVFD_MKNOD)
-    { "auth-server-dir",   required_argument, NULL, OPT_AUTH_SERVER  },
-    { "auth-client-dir",   required_argument, NULL, OPT_AUTH_CLIENT  },
+    { "auth-server-dir",   required_argument, NULL, OPT_AUTH_SERVER   },
+    { "auth-client-dir",   required_argument, NULL, OPT_AUTH_CLIENT   },
 #endif /* AUTH_METHOD_RECVFD_MKFIFO || AUTH_METHOD_RECVFD_MKNOD */
-    { "benchmark",         no_argument,       NULL, OPT_BENCHMARK    },
-    { "group-check-mtime", required_argument, NULL, OPT_GROUP_CHECK  },
-    { "group-update-time", required_argument, NULL, OPT_GROUP_UPDATE },
-    { "syslog",            no_argument,       NULL, OPT_SYSLOG       },
-    {  NULL,               0,                 NULL,  0               }
+    { "benchmark",         no_argument,       NULL, OPT_BENCHMARK     },
+    { "group-check-mtime", required_argument, NULL, OPT_GROUP_CHECK   },
+    { "group-update-time", required_argument, NULL, OPT_GROUP_UPDATE  },
+    { "key-file",          required_argument, NULL, OPT_KEY_FILE      },
+    { "log-file",          required_argument, NULL, OPT_LOG_FILE      },
+    { "max-ttl",           required_argument, NULL, OPT_MAX_TTL       },
+    { "num-threads",       required_argument, NULL, OPT_NUM_THREADS   },
+    { "pid-file",          required_argument, NULL, OPT_PID_FILE      },
+    { "seed-file",         required_argument, NULL, OPT_SEED_FILE     },
+    { "syslog",            no_argument,       NULL, OPT_SYSLOG        },
+    { "trusted-group",     required_argument, NULL, OPT_TRUSTED_GROUP },
+    {  NULL,               0,                 NULL, 0                 }
 };
 
 
 /*****************************************************************************
  *  Internal Prototypes
  *****************************************************************************/
+
+static void _process_stop (conf_t conf);
+
+static int _send_signal (pid_t pid, int signum, int msecs);
 
 static int _conf_open_keyfile (const char *keyfile, int got_force);
 
@@ -128,10 +148,12 @@ create_conf (void)
     conf->got_force = 0;
     conf->got_foreground = 0;
     conf->got_group_stat = !! MUNGE_GROUP_STAT_FLAG;
+    conf->got_stop = 0;
     conf->got_mlockall = 0;
     conf->got_root_auth = !! MUNGE_AUTH_ROOT_ALLOW_FLAG;
     conf->got_socket_retry = !! MUNGE_SOCKET_RETRY_FLAG;
     conf->got_syslog = 0;
+    conf->got_verbose = 0;
     conf->def_cipher = MUNGE_DEFAULT_CIPHER;
     conf->def_zip = zip_select_default_type (MUNGE_DEFAULT_ZIP);
     conf->def_mac = MUNGE_DEFAULT_MAC;
@@ -192,7 +214,7 @@ create_conf (void)
 
 
 void
-destroy_conf (conf_t conf)
+destroy_conf (conf_t conf, int do_unlink)
 {
     assert (conf != NULL);
     assert (conf->ld < 0);              /* sock_destroy() already called */
@@ -211,7 +233,9 @@ destroy_conf (conf_t conf)
         conf->logfile_name = NULL;
     }
     if (conf->pidfile_name) {
-        (void) unlink (conf->pidfile_name);
+        if (do_unlink) {
+            (void) unlink (conf->pidfile_name);
+        }
         free (conf->pidfile_name);
         conf->pidfile_name = NULL;
     }
@@ -259,6 +283,8 @@ parse_cmdline (conf_t conf, int argc, char **argv)
     long  l;
     char *p;
 
+    assert (conf != NULL);
+
     opterr = 0;                         /* suppress default getopt err msgs */
 
     prog = (prog = strrchr (argv[0], '/')) ? prog + 1 : argv[0];
@@ -292,6 +318,9 @@ parse_cmdline (conf_t conf, int argc, char **argv)
             case 'M':
                 conf->got_mlockall = 1;
                 break;
+            case 's':
+                conf->got_stop = 1;
+                break;
             case 'S':
                 if (conf->socket_name)
                     free (conf->socket_name);
@@ -299,27 +328,12 @@ parse_cmdline (conf_t conf, int argc, char **argv)
                     log_errno (EMUNGE_NO_MEMORY, LOG_ERR,
                         "Failed to copy socket name string");
                 break;
+            case 'v':
+                conf->got_verbose = 1;
+                break;
             case OPT_ADVICE:
                 printf ("Don't Panic!\n");
                 exit (42);
-            case OPT_KEY_FILE:
-                if (conf->key_name)
-                    free (conf->key_name);
-                if (!(conf->key_name = strdup (optarg)))
-                    log_errno (EMUNGE_NO_MEMORY, LOG_ERR,
-                        "Failed to copy key-file name string");
-                break;
-            case OPT_NUM_THREADS:
-                errno = 0;
-                l = strtol (optarg, &p, 10);
-                if (((errno == ERANGE) && ((l == LONG_MIN) || (l == LONG_MAX)))
-                        || (optarg == p) || (*p != '\0')
-                        || (l <= 0) || (l > INT_MAX)) {
-                    log_err (EMUNGE_SNAFU, LOG_ERR,
-                        "Invalid value \"%s\" for num-threads", optarg);
-                }
-                conf->nthreads = l;
-                break;
 #if defined(AUTH_METHOD_RECVFD_MKFIFO) || defined(AUTH_METHOD_RECVFD_MKNOD)
             case OPT_AUTH_SERVER:
                 if (conf->auth_server_dir)
@@ -360,8 +374,63 @@ parse_cmdline (conf_t conf, int argc, char **argv)
                 }
                 conf->gids_update_secs = l;
                 break;
+            case OPT_KEY_FILE:
+                if (conf->key_name)
+                    free (conf->key_name);
+                if (!(conf->key_name = strdup (optarg)))
+                    log_errno (EMUNGE_NO_MEMORY, LOG_ERR,
+                        "Failed to copy key-file name string");
+                break;
+            case OPT_LOG_FILE:
+                if (conf->logfile_name)
+                    free (conf->logfile_name);
+                if (!(conf->logfile_name = strdup (optarg)))
+                    log_errno (EMUNGE_NO_MEMORY, LOG_ERR,
+                        "Failed to copy log-file name string");
+                break;
+            case OPT_MAX_TTL:
+                l = strtol (optarg, &p, 10);
+                if (((errno == ERANGE) && ((l == LONG_MIN) || (l == LONG_MAX)))
+                        || (optarg == p) || (*p != '\0')
+                        || (l < 1) || (l > MUNGE_MAXIMUM_TTL)) {
+                    log_err (EMUNGE_SNAFU, LOG_ERR,
+                        "Invalid value \"%s\" for max-ttl", optarg);
+                }
+                conf->max_ttl = l;
+                break;
+            case OPT_NUM_THREADS:
+                errno = 0;
+                l = strtol (optarg, &p, 10);
+                if (((errno == ERANGE) && ((l == LONG_MIN) || (l == LONG_MAX)))
+                        || (optarg == p) || (*p != '\0')
+                        || (l <= 0) || (l > INT_MAX)) {
+                    log_err (EMUNGE_SNAFU, LOG_ERR,
+                        "Invalid value \"%s\" for num-threads", optarg);
+                }
+                conf->nthreads = l;
+                break;
+            case OPT_PID_FILE:
+                if (conf->pidfile_name)
+                    free (conf->pidfile_name);
+                if (!(conf->pidfile_name = strdup (optarg)))
+                    log_errno (EMUNGE_NO_MEMORY, LOG_ERR,
+                        "Failed to copy pid-file name string");
+                break;
+            case OPT_SEED_FILE:
+                if (conf->seed_name)
+                    free (conf->seed_name);
+                if (!(conf->seed_name = strdup (optarg)))
+                    log_errno (EMUNGE_NO_MEMORY, LOG_ERR,
+                        "Failed to copy seed-file name string");
+                break;
             case OPT_SYSLOG:
                 conf->got_syslog = 1;
+                break;
+            case OPT_TRUSTED_GROUP:
+                if (path_set_trusted_group (optarg) < 0) {
+                    log_err (EMUNGE_SNAFU, LOG_ERR,
+                        "Invalid value \"%s\" for trusted-group", optarg);
+                }
                 break;
             case '?':
                 if (optopt > 0) {
@@ -410,6 +479,9 @@ parse_cmdline (conf_t conf, int argc, char **argv)
         log_err (EMUNGE_SNAFU, LOG_ERR,
             "Unrecognized parameter \"%s\"", argv[optind]);
     }
+    if (conf->got_stop) {
+        _process_stop (conf);
+    }
     return;
 }
 
@@ -446,8 +518,14 @@ display_help (char *prog)
     printf ("  %*s %s\n", w, "-M, --mlockall",
             "Lock all pages in memory");
 
+    printf ("  %*s %s\n", w, "-s, --stop",
+            "Stop daemon bound to socket");
+
     printf ("  %*s %s [%s]\n", w, "-S, --socket=PATH",
             "Specify local socket", MUNGE_SOCKET_NAME);
+
+    printf ("  %*s %s\n", w, "-v, --verbose",
+            "Be verbose");
 
     printf ("\n");
 
@@ -471,13 +549,28 @@ display_help (char *prog)
             MUNGE_GROUP_UPDATE_SECS);
 
     printf ("  %*s %s [%s]\n", w, "--key-file=PATH",
-            "Specify secret key file", MUNGED_SECRET_KEY);
+            "Specify key file", MUNGED_SECRET_KEY);
+
+    printf ("  %*s %s [%s]\n", w, "--log-file=PATH",
+            "Specify log file", MUNGED_LOGFILE);
+
+    printf ("  %*s %s [%d]\n", w, "--max-ttl=INT",
+            "Specify maximum time-to-live (in seconds)", MUNGE_MAXIMUM_TTL);
 
     printf ("  %*s %s [%d]\n", w, "--num-threads=INT",
             "Specify number of threads to spawn", MUNGE_THREADS);
 
+    printf ("  %*s %s [%s]\n", w, "--pid-file=PATH",
+            "Specify PID file", MUNGED_PIDFILE);
+
+    printf ("  %*s %s [%s]\n", w, "--seed-file=PATH",
+            "Specify PRNG seed file", MUNGED_RANDOM_SEED);
+
     printf ("  %*s %s\n", w, "--syslog",
             "Redirect log messages to syslog");
+
+    printf ("  %*s %s\n", w, "--trusted-group=GROUP",
+            "Specify trusted group/GID for directory checks");
 
     printf ("\n");
     return;
@@ -629,6 +722,116 @@ lookup_ip_addr (conf_t conf)
  *  Internal Functions
  *****************************************************************************/
 
+static void
+_process_stop (conf_t conf)
+{
+/*  Processes the -s/--stop option.
+ *  A series of SIGTERMs are sent to the process holding the write-lock.
+ *    If the process fails to terminate, a final SIGKILL is sent.
+ */
+    pid_t pid;
+    int   signum;
+    int   msecs;
+    int   i;
+    int   rv;
+
+    assert (conf != NULL);
+    assert (MUNGE_SIGNAL_ATTEMPTS > 0);
+    assert (MUNGE_SIGNAL_DELAY_MSECS > 0);
+
+    pid = lock_query (conf);
+    if (pid <= 0) {
+        if (conf->got_verbose) {
+            log_err (EMUNGE_SNAFU, LOG_ERR,
+                    "Failed to signal daemon bound to socket \"%s\""
+                    ": Lockfile not found", conf->socket_name);
+        }
+        exit (EXIT_FAILURE);
+    }
+    rv = kill (pid, 0);
+    if (rv < 0) {
+        if (conf->got_verbose) {
+            log_errno (EMUNGE_SNAFU, LOG_ERR,
+                    "Failed to signal daemon bound to socket \"%s\" (pid %d)",
+                    conf->socket_name, pid);
+        }
+        exit (EXIT_FAILURE);
+    }
+    signum = SIGTERM;
+    msecs = 0;
+    for (i = 0; i < (MUNGE_SIGNAL_ATTEMPTS + 1); i++) {
+        if (i == MUNGE_SIGNAL_ATTEMPTS) {
+            signum = SIGKILL;           /* Kill me harder! */
+        }
+        msecs += MUNGE_SIGNAL_DELAY_MSECS;
+        rv = _send_signal (pid, signum, msecs);
+        if (rv == 0) {
+            if (conf->got_verbose) {
+                log_msg (LOG_NOTICE,
+                        "%s daemon bound to socket \"%s\" (pid %d)",
+                        (signum == SIGTERM) ? "Terminated" : "Killed",
+                        conf->socket_name, pid);
+            }
+            exit (EXIT_SUCCESS);
+        }
+    }
+    if (conf->got_verbose) {
+        log_err (EMUNGE_SNAFU, LOG_ERR,
+                "Failed to terminate daemon bound to socket \"%s\" (pid %d)",
+                conf->socket_name, pid);
+    }
+    exit (EXIT_FAILURE);
+}
+
+
+static int
+_send_signal (pid_t pid, int signum, int msecs)
+{
+/*  Sends the signal [signum] to the process specified by [pid].
+ *  Returns 1 if the process is still running after a delay of [msecs],
+ *    or 0 if the process cannot be found.
+ */
+    struct timespec ts;
+    int             rv;
+
+    assert (pid > 0);
+    assert (signum > 0);
+    assert (msecs > 0);
+
+    log_msg (LOG_DEBUG, "Signaling pid %d with sig %d and %dms delay",
+            pid, signum, msecs);
+
+    rv = kill (pid, signum);
+    if (rv < 0) {
+        if (errno == ESRCH) {
+            return (0);
+        }
+        log_errno (EMUNGE_SNAFU, LOG_ERR,
+                "Failed to signal daemon (pid %d, sig %d)", pid, signum);
+    }
+    ts.tv_sec = msecs / 1000;
+    ts.tv_nsec = (msecs % 1000) * 1000 * 1000;
+retry:
+    rv = nanosleep (&ts, &ts);
+    if (rv < 0) {
+        if (errno == EINTR) {
+            goto retry;
+        }
+        log_errno (EMUNGE_SNAFU, LOG_ERR,
+                "Failed to sleep while awaiting signal result");
+    }
+    rv = kill (pid, 0);
+    if (rv < 0) {
+        if (errno == ESRCH) {
+            return (0);
+        }
+        log_errno (EMUNGE_SNAFU, LOG_ERR,
+                "Failed to check daemon (pid %d, sig 0)", pid);
+    }
+    return (1);
+}
+
+
 static int
 _conf_open_keyfile (const char *keyfile, int got_force)
 {
@@ -688,7 +891,7 @@ _conf_open_keyfile (const char *keyfile, int got_force)
         log_err (EMUNGE_SNAFU, LOG_ERR,
             "Failed to determine dirname of keyfile \"%s\"", keyfile);
     }
-    n = path_is_secure (keydir, ebuf, sizeof (ebuf));
+    n = path_is_secure (keydir, ebuf, sizeof (ebuf), PATH_SECURITY_NO_FLAGS);
     if (n < 0) {
         log_err (EMUNGE_SNAFU, LOG_ERR,
             "Failed to check keyfile dir \"%s\": %s", keydir, ebuf);

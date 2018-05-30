@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -37,12 +37,12 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 #include <munge.h>
 #include "auth_send.h"
 #include "ctx.h"
 #include "fd.h"
-#include "missing.h"
 #include "m_msg.h"
 #include "m_msg_client.h"
 #include "munge_defs.h"
@@ -55,6 +55,7 @@
 
 static munge_err_t _m_msg_client_connect (m_msg_t m, char *path);
 static munge_err_t _m_msg_client_disconnect (m_msg_t m);
+static munge_err_t _m_msg_client_millisleep (m_msg_t m, unsigned long msecs);
 
 
 /*****************************************************************************
@@ -69,8 +70,6 @@ m_msg_client_xfer (m_msg_t *pm, m_msg_type_t mreq_type, munge_ctx_t ctx)
     munge_err_t   e;
     m_msg_t       mreq, mrsp;
     m_msg_type_t  mrsp_type;
-
-    assert (MUNGE_SOCKET_RETRY_ATTEMPTS * MUNGE_SOCKET_RETRY_USECS < 1000000);
 
     if (!pm || !*pm) {
         return (EMUNGE_SNAFU);
@@ -134,7 +133,10 @@ m_msg_client_xfer (m_msg_t *pm, m_msg_type_t mreq_type, munge_ctx_t ctx)
             mreq->sd = -1;
         }
         mreq->retry = i;
-        usleep (i * MUNGE_SOCKET_RETRY_USECS);
+        e = _m_msg_client_millisleep (mreq, i * MUNGE_SOCKET_RETRY_MSECS);
+        if (e != EMUNGE_SUCCESS) {
+            break;
+        }
         i++;
     }
     if (mrsp) {
@@ -158,7 +160,7 @@ _m_msg_client_connect (m_msg_t m, char *path)
     int                 sd;
     int                 n;
     int                 i;
-    int                 delay;
+    unsigned long       delay_msecs;
 
     assert (m != NULL);
     assert (m->sd < 0);
@@ -192,15 +194,15 @@ _m_msg_client_connect (m_msg_t m, char *path)
     }
     memset (&addr, 0, sizeof (addr));
     addr.sun_family = AF_UNIX;
-    n = strlcpy (addr.sun_path, path, sizeof (addr.sun_path));
-    if (n >= sizeof (addr.sun_path)) {
+    addr.sun_path[ sizeof (addr.sun_path) - 1 ] = '\0';
+    strncpy (addr.sun_path, path, sizeof (addr.sun_path));
+    if (addr.sun_path[ sizeof (addr.sun_path) - 1 ] != '\0') {
         close (sd);
         m_msg_set_err (m, EMUNGE_OVERFLOW,
             strdup ("Exceeded maximum length of socket pathname"));
         return (EMUNGE_OVERFLOW);
     }
     i = 1;
-    delay = 1;
     while (1) {
         /*
          * If a call to connect() for a Unix domain stream socket finds that
@@ -222,8 +224,10 @@ _m_msg_client_connect (m_msg_t m, char *path)
         if (i >= MUNGE_SOCKET_CONNECT_ATTEMPTS) {
             break;
         }
-        sleep (delay);
-        delay++;
+        delay_msecs = i * MUNGE_SOCKET_CONNECT_RETRY_MSECS;
+        if (_m_msg_client_millisleep (m, delay_msecs) != EMUNGE_SUCCESS) {
+            break;
+        }
         i++;
     }
     if (n < 0) {
@@ -255,4 +259,35 @@ _m_msg_client_disconnect (m_msg_t m) {
     }
     m->sd = -1;
     return (e);
+}
+
+
+static munge_err_t
+_m_msg_client_millisleep (m_msg_t m, unsigned long msecs)
+{
+/*  Sleeps for 'msecs' milliseconds.
+ *  Returns EMUNGE_SUCCESS on success,
+ *    or EMUNGE_SNAFU on error (with additional info if 'm' is not NULL).
+ */
+    struct timespec ts;
+    int rv;
+
+    ts.tv_sec = msecs / 1000;
+    ts.tv_nsec = (msecs % 1000) * 1000 * 1000;
+
+    while (1) {
+        rv = nanosleep (&ts, &ts);
+        if (rv == 0) {
+            break;
+        }
+        else if (errno == EINTR) {
+            continue;
+        }
+        else if (m != NULL) {
+            m_msg_set_err (m, EMUNGE_SNAFU,
+                strdupf ("Failed nanosleep: %s", strerror (errno)));
+        }
+        return (EMUNGE_SNAFU);
+    }
+    return (EMUNGE_SUCCESS);
 }

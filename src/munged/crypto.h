@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -58,19 +58,6 @@ int crypto_memcmp (const void *s1, const void *s2, size_t n);
  *    contents of either [s1] or [s2].
  *  Returns 0 if the memory regions are equal, or non-zero otherwise.
  */
-
-
-#if HAVE_OPENSSL
-
-#include "log.h"
-
-void openssl_log_msg (int priority);
-/*
- *  Logs all OpenSSL errors in this thread's error queue (should any exist)
- *    at the specified [priority] level.
- */
-
-#endif /* HAVE_OPENSSL */
 
 
 #endif /* !CRYPTO_H */

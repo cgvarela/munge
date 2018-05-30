@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -39,7 +39,9 @@
 #elif HAVE_GETPWNAM_R_SUN
 #undef _POSIX_PTHREAD_SEMANTICS
 #elif HAVE_GETPWNAM
+#ifdef WITH_PTHREADS
 #include <pthread.h>
+#endif /* WITH_PTHREADS */
 #else
 #error "getpwnam() not supported"
 #endif
@@ -54,7 +56,7 @@
 #include <unistd.h>
 #include <munge.h>
 #include "log.h"
-#include "xgetpwnam.h"
+#include "xgetpw.h"
 
 
 /*****************************************************************************
@@ -89,14 +91,14 @@ struct xpwbuf_t {
  *  Private Prototypes
  *****************************************************************************/
 
-static size_t _xgetpwnam_buf_get_sys_size (void);
+static size_t _xgetpwbuf_get_sys_size (void);
 
-static int _xgetpwnam_buf_grow (xpwbuf_p pwbufp, size_t minlen);
+static int _xgetpwbuf_grow (xpwbuf_p pwbufp, size_t minlen);
 
-static int _xgetpwnam_copy (const struct passwd *src, struct passwd *dst,
-    xpwbuf_p pwbufp) _UNUSED_;
+static int _xgetpwbuf_copy_struct (const struct passwd *src,
+    struct passwd *dst, xpwbuf_p pwbufp) _UNUSED_;
 
-static int _xgetpwnam_copy_str (const char *src, char **dstp,
+static int _xgetpwbuf_copy_string (const char *src, char **dstp,
     char **bufp, size_t *buflenp) _UNUSED_;
 
 
@@ -105,7 +107,7 @@ static int _xgetpwnam_copy_str (const char *src, char **dstp,
  *****************************************************************************/
 
 xpwbuf_p
-xgetpwnam_buf_create (size_t len)
+xgetpwbuf_create (size_t len)
 {
 /*  Allocates a buffer for xgetpwnam().  [len] specifies a suggested size
  *    for the buffer; if 0, the system recommended size will be used.
@@ -114,7 +116,7 @@ xgetpwnam_buf_create (size_t len)
     xpwbuf_p pwbufp;
 
     if (len == 0) {
-        len = _xgetpwnam_buf_get_sys_size ();
+        len = _xgetpwbuf_get_sys_size ();
     }
     pwbufp = malloc (sizeof (struct xpwbuf_t));
     if (pwbufp == NULL) {
@@ -132,7 +134,7 @@ xgetpwnam_buf_create (size_t len)
 
 
 void
-xgetpwnam_buf_destroy (xpwbuf_p pwbufp)
+xgetpwbuf_destroy (xpwbuf_p pwbufp)
 {
 /*  Destroys the buffer [pwbufp].
  */
@@ -147,7 +149,7 @@ xgetpwnam_buf_destroy (xpwbuf_p pwbufp)
 
 
 size_t
-xgetpwnam_buf_get_len (xpwbuf_p pwbufp)
+xgetpwbuf_get_len (xpwbuf_p pwbufp)
 {
 /*  Returns the current size of the allocated buffer within [pwbufp],
  *    or 0 on error (with errno).
@@ -161,13 +163,13 @@ xgetpwnam_buf_get_len (xpwbuf_p pwbufp)
 
 
 int
-xgetpwnam (const char *user, struct passwd *pwp, xpwbuf_p pwbufp)
+xgetpwnam (const char *name, struct passwd *pwp, xpwbuf_p pwbufp)
 {
 /*  Portable encapsulation of getpwnam_r().
- *  Queries the password database for [user], storing the struct passwd result
+ *  Queries the password database for [name], storing the struct passwd result
  *    in [pwp] and additional strings in the buffer [pwbufp].
  *  Returns 0 on success, or -1 on error (with errno).
- *    Returns -1 with ENOENT when [user] is not found.
+ *    Returns -1 with ENOENT when [name] is not found.
  */
 #if   HAVE_GETPWNAM_R_POSIX
     struct passwd          *rv_pwp;
@@ -175,17 +177,19 @@ xgetpwnam (const char *user, struct passwd *pwp, xpwbuf_p pwbufp)
 #elif HAVE_GETPWNAM_R_SUN
     struct passwd          *rv_pwp;
 #elif HAVE_GETPWNAM
+#ifdef WITH_PTHREADS
     static pthread_mutex_t  mutex = PTHREAD_MUTEX_INITIALIZER;
     int                     rv_mutex;
+#endif /* WITH_PTHREADS */
     int                     rv_copy;
     struct passwd          *rv_pwp;
-#endif
+#endif /* HAVE_GETPWNAM */
     int                     rv;
     int                     got_err;
     int                     got_none;
 
-    if ((user == NULL)    ||
-        (user[0] == '\0') ||
+    if ((name == NULL)    ||
+        (name[0] == '\0') ||
         (pwp == NULL)     ||
         (pwbufp == NULL))
     {
@@ -201,9 +205,10 @@ restart:
     got_none = 0;
 
 #if   HAVE_GETPWNAM_R_POSIX
-    rv = getpwnam_r (user, pwp, pwbufp->buf, pwbufp->len, &rv_pwp);
+    rv_pwp = NULL;
+    rv = getpwnam_r (name, pwp, pwbufp->buf, pwbufp->len, &rv_pwp);
     /*
-     *  POSIX.1-2001 does not call "user not found" an error, so the return
+     *  POSIX.1-2001 does not call "name not found" an error, so the return
      *    value of getpwnam_r() is of limited value.  When errors do occur,
      *    some systems return them via the retval, some via errno, and some
      *    return no indication whatsoever.
@@ -215,7 +220,7 @@ restart:
         if ((rv < 0) && (errno != 0)) {
             rv = errno;
         }
-        /*  Likely that the user was not found.
+        /*  Likely that the name was not found.
          */
         if ((rv == 0)      ||
             (rv == ENOENT) ||
@@ -235,14 +240,14 @@ restart:
             got_err = 1;
             errno = rv;
         }
-        /*  Unable to distinguish "user not found" from error.
+        /*  Unable to distinguish "name not found" from error.
          */
         else {
             got_none = 1;
         }
     }
 #elif HAVE_GETPWNAM_R_AIX
-    rv = getpwnam_r (user, pwp, pwbufp->buf, pwbufp->len);
+    rv = getpwnam_r (name, pwp, pwbufp->buf, pwbufp->len);
     if (rv != 0) {
         if (errno == ESRCH) {
             got_none = 1;
@@ -252,7 +257,7 @@ restart:
         }
     }
 #elif HAVE_GETPWNAM_R_SUN
-    rv_pwp = getpwnam_r (user, pwp, pwbufp->buf, pwbufp->len);
+    rv_pwp = getpwnam_r (name, pwp, pwbufp->buf, pwbufp->len);
     if (rv_pwp == NULL) {
         if (errno == 0) {
             got_none = 1;
@@ -262,14 +267,16 @@ restart:
         }
     }
 #elif HAVE_GETPWNAM
+#ifdef WITH_PTHREADS
     if ((rv_mutex = pthread_mutex_lock (&mutex)) != 0) {
         errno = rv_mutex;
         log_errno (EMUNGE_SNAFU, LOG_ERR, "Failed to lock xgetpwnam mutex");
     }
-    rv_pwp = getpwnam (user);
+#endif /* WITH_PTHREADS */
+    rv_pwp = getpwnam (name);
     /*
      *  The initial test for (errno != 0), while redundant, allows for the
-     *    "user not found" case to short-circuit the rest of the if-condition
+     *    "name not found" case to short-circuit the rest of the if-condition
      *    on many systems.
      */
     if (rv_pwp == NULL) {
@@ -286,18 +293,21 @@ restart:
         else {
             got_none = 1;
         }
+        rv_copy = 0;
     }
     else {
-        rv_copy = _xgetpwnam_copy (rv_pwp, pwp, pwbufp);
+        rv_copy = _xgetpwbuf_copy_struct (rv_pwp, pwp, pwbufp);
     }
+#ifdef WITH_PTHREADS
     if ((rv_mutex = pthread_mutex_unlock (&mutex)) != 0) {
         errno = rv_mutex;
         log_errno (EMUNGE_SNAFU, LOG_ERR, "Failed to unlock xgetpwnam mutex");
     }
+#endif /* WITH_PTHREADS */
     if (rv_copy < 0) {
         return (-1);
     }
-#endif
+#endif /* HAVE_GETPWNAM */
 
     if (got_none) {
         errno = ENOENT;
@@ -308,7 +318,7 @@ restart:
             goto restart;
         }
         if (errno == ERANGE) {
-            rv = _xgetpwnam_buf_grow (pwbufp, 0);
+            rv = _xgetpwbuf_grow (pwbufp, 0);
             if (rv == 0) {
                 goto restart;
             }
@@ -327,9 +337,9 @@ restart:
  *****************************************************************************/
 
 static size_t
-_xgetpwnam_buf_get_sys_size (void)
+_xgetpwbuf_get_sys_size (void)
 {
-/*  Returns the system recommended size for the xgetpwnam() buffer.
+/*  Returns the system recommended size for the xgetpw buffer.
  */
     long   n = -1;
     size_t len;
@@ -346,7 +356,7 @@ _xgetpwnam_buf_get_sys_size (void)
 
 
 static int
-_xgetpwnam_buf_grow (xpwbuf_p pwbufp, size_t minlen)
+_xgetpwbuf_grow (xpwbuf_p pwbufp, size_t minlen)
 {
 /*  Grows the buffer [pwbufp] to be at least as large as the length [minlen].
  *  Returns 0 on success, or -1 on error (with errno).
@@ -381,9 +391,10 @@ _xgetpwnam_buf_grow (xpwbuf_p pwbufp, size_t minlen)
 
 
 static int
-_xgetpwnam_copy (const struct passwd *src, struct passwd *dst, xpwbuf_p pwbufp)
+_xgetpwbuf_copy_struct (const struct passwd *src, struct passwd *dst,
+                        xpwbuf_p pwbufp)
 {
-/*  Copies the passwd entry [src] into [dst], placing additional strings
+/*  Copies the struct passwd [src] into [dst], placing additional strings
  *    and whatnot into buffer [pwbuf].
  *  Returns 0 on success, or -1 on error (with errno).
  */
@@ -417,7 +428,7 @@ _xgetpwnam_copy (const struct passwd *src, struct passwd *dst, xpwbuf_p pwbufp)
     /*  Ensure requisite buffer space.
      */
     if (pwbufp->len < num_bytes) {
-        if (_xgetpwnam_buf_grow (pwbufp, num_bytes) < 0) {
+        if (_xgetpwbuf_grow (pwbufp, num_bytes) < 0) {
             return (-1);
         }
     }
@@ -427,23 +438,23 @@ _xgetpwnam_copy (const struct passwd *src, struct passwd *dst, xpwbuf_p pwbufp)
     memset (dst, 0, sizeof (*dst));
     p = pwbufp->buf;
 
-    if (_xgetpwnam_copy_str
+    if (_xgetpwbuf_copy_string
             (src->pw_name, &(dst->pw_name), &p, &num_bytes) < 0) {
         goto err;
     }
-    if (_xgetpwnam_copy_str
+    if (_xgetpwbuf_copy_string
             (src->pw_passwd, &(dst->pw_passwd), &p, &num_bytes) < 0) {
         goto err;
     }
-    if (_xgetpwnam_copy_str
+    if (_xgetpwbuf_copy_string
             (src->pw_gecos, &(dst->pw_gecos), &p, &num_bytes) < 0) {
         goto err;
     }
-    if (_xgetpwnam_copy_str
+    if (_xgetpwbuf_copy_string
             (src->pw_dir, &(dst->pw_dir), &p, &num_bytes) < 0) {
         goto err;
     }
-    if (_xgetpwnam_copy_str
+    if (_xgetpwbuf_copy_string
             (src->pw_shell, &(dst->pw_shell), &p, &num_bytes) < 0) {
         goto err;
     }
@@ -460,8 +471,8 @@ err:
 
 
 static int
-_xgetpwnam_copy_str (const char *src, char **dstp,
-                     char **bufp, size_t *buflenp)
+_xgetpwbuf_copy_string (const char *src, char **dstp,
+                        char **bufp, size_t *buflenp)
 {
 /*  Copies the string [src] into the buffer [bufp] of size [buflenp],
  *    setting the pointer [dstp] to the newly-copied string.  The values

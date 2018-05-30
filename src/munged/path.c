@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -33,15 +33,23 @@
 #endif /* HAVE_CONFIG_H */
 
 #include <errno.h>
-#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "common.h"
 #include "path.h"
+#include "query.h"
 #include "strlcpy.h"
+
+
+/*****************************************************************************
+ *  Internal Variables
+ *****************************************************************************/
+
+static gid_t _path_trusted_gid = GID_SENTINEL;
 
 
 /*****************************************************************************
@@ -174,7 +182,8 @@ path_is_accessible (const char *path, char *errbuf, size_t errbuflen)
 
 
 int
-path_is_secure (const char *path, char *errbuf, size_t errbuflen)
+path_is_secure (const char *path, char *errbuf, size_t errbuflen,
+                path_security_flag_t flags)
 {
     int          n;
     char         buf [PATH_MAX];
@@ -217,13 +226,19 @@ path_is_secure (const char *path, char *errbuf, size_t errbuflen)
             return (_path_set_err (0, errbuf, errbuflen,
                 "invalid ownership of \"%s\"", buf));
         }
-        if ((st.st_mode & S_IWGRP) && !(st.st_mode & S_ISVTX)) {
+        if (!(flags & PATH_SECURITY_IGNORE_GROUP_WRITE) &&
+             (st.st_mode & S_IWGRP)                     &&
+            !(st.st_mode & S_ISVTX)                     &&
+             ((st.st_gid != _path_trusted_gid) ||
+              (_path_trusted_gid == GID_SENTINEL))) {
             return (_path_set_err (0, errbuf, errbuflen,
-                "group-writable permissions set on \"%s\"", buf));
+                "group-writable permissions without sticky bit set on \"%s\"",
+                buf));
         }
         if ((st.st_mode & S_IWOTH) && !(st.st_mode & S_ISVTX)) {
             return (_path_set_err (0, errbuf, errbuflen,
-                "world-writable permissions set on \"%s\"", buf));
+                "world-writable permissions without sticky bit set on \"%s\"",
+                buf));
         }
         if (!(p = strrchr (buf, '/'))) {
             errno = EINVAL;
@@ -236,6 +251,31 @@ path_is_secure (const char *path, char *errbuf, size_t errbuflen)
         *p = '\0';
     }
     return (1);
+}
+
+
+int
+path_get_trusted_group (gid_t *gid_ptr)
+{
+    if (_path_trusted_gid == GID_SENTINEL) {
+        errno = ERANGE;
+        return (-1);
+    }
+    if (gid_ptr != NULL) {
+        *gid_ptr = _path_trusted_gid;
+    }
+    return (0);
+}
+
+
+int
+path_set_trusted_group (const char *group)
+{
+    if (group == NULL) {
+        _path_trusted_gid = GID_SENTINEL;
+        return (0);
+    }
+    return (query_gid (group, &_path_trusted_gid));
 }
 
 

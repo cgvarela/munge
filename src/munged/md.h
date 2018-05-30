@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -62,7 +62,7 @@ typedef struct {
 #include <openssl/evp.h>
 
 typedef struct {
-    EVP_MD_CTX          ctx;
+    EVP_MD_CTX         *ctx;
     int                 diglen;
 #ifndef NDEBUG
     int                 magic;
@@ -85,7 +85,7 @@ void md_init_subsystem (void);
 
 int md_init (md_ctx *x, munge_mac_t md);
 /*
- *  Initializes the message digest context [x] with the message digest [md].
+ *  Initializes a new message digest context [x] with the message digest [md].
  *  Returns 0 on success, or -1 on error.
  */
 
@@ -114,9 +114,10 @@ int md_cleanup (md_ctx *x);
 
 int md_copy (md_ctx *xdst, md_ctx *xsrc);
 /*
- *  Copies the message digest state from the [xsrc] context to [xdst].
- *    This is useful if large amounts of data are to be hashed which only
- *    differ in thye last few bytes.
+ *  Initializes a new message digest context [xdst], and copies the state
+ *    from the [xsrc] context to the new [xdst] context.
+ *  This is useful if large amounts of data are to be hashed which only differ
+ *    in the last few bytes.
  *  Returns 0 on success, or -1 on error.
  */
 

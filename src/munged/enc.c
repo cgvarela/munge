@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -267,8 +267,8 @@ enc_check_retry (munge_cred_t c)
 
     if (m->retry > 0) {
         log_msg (LOG_INFO,
-            "Encode retry #%d for client UID=%d GID=%d",
-            m->retry, m->client_uid, m->client_gid);
+            "Encode retry #%d for client UID=%u GID=%u", m->retry,
+            (unsigned int) m->client_uid, (unsigned int) m->client_gid);
     }
     if (m->retry > MUNGE_SOCKET_RETRY_ATTEMPTS) {
         return (m_msg_set_err (m, EMUNGE_SOCKET,

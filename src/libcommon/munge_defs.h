@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -65,7 +65,11 @@
 /*  Default munge_mac_t for validating credentials.
  *    This should NEVER be set to MUNGE_MAC_NONE.
  */
-#define MUNGE_DEFAULT_MAC               MUNGE_MAC_SHA1
+#if HAVE_OPENSSL && !HAVE_EVP_SHA256
+#  define MUNGE_DEFAULT_MAC             MUNGE_MAC_SHA1
+#else  /* !HAVE_OPENSSL || HAVE_EVP_SHA256 */
+#  define MUNGE_DEFAULT_MAC             MUNGE_MAC_SHA256
+#endif /* !HAVE_OPENSSL || HAVE_EVP_SHA256 */
 
 /*  Default munge_zip_t for compressing credentials.
  *    Compression incurs a substantial performance penalty.
@@ -124,17 +128,38 @@
  */
 #define MUNGE_REPLAY_PURGE_SECS         60
 
+/*  Number of attempts to signal a process before sending SIGKILL.
+ */
+#define MUNGE_SIGNAL_ATTEMPTS           10
+
+/*  Starting number of milliseconds between signaling a process and checking
+ *    to see if it has responded (i.e., kicked the bucket, shuffled off this
+ *    mortal coil, run down the curtain, and joined the bleedin' choir
+ *    invisible).  The delay is further incremented by this amount after each
+ *    attempt.
+ */
+#define MUNGE_SIGNAL_DELAY_MSECS        100
+
 /*  Socket backlog for the server listening on the unix domain socket.
  */
 #define MUNGE_SOCKET_BACKLOG            256
 
 /*  String specifying the unix domain socket pathname for client-server comms.
+ *  May be overridden in "config.h".
  */
+#ifndef MUNGE_SOCKET_NAME
 #define MUNGE_SOCKET_NAME               X_LOCALSTATEDIR "/run/munge/munge.socket.2"
+#endif /* !MUNGE_SOCKET_NAME */
 
 /*  Number of attempts a client makes connecting to the server before failing.
  */
-#define MUNGE_SOCKET_CONNECT_ATTEMPTS   5
+#define MUNGE_SOCKET_CONNECT_ATTEMPTS   10
+
+/*  Number of milliseconds for the start of the linear back-off where the
+ *    client sleeps between attempts at retrying a connection to the unix
+ *    domain socket.
+ */
+#define MUNGE_SOCKET_CONNECT_RETRY_MSECS        50
 
 /*  Flag to allow previously-decoded credentials to be retried.
  *  If the client receives a socket error while communicating with the
@@ -151,15 +176,14 @@
  */
 #define MUNGE_SOCKET_RETRY_ATTEMPTS     5
 
-/*  Number of microseconds for the start of the linear back-off where the
+/*  Number of milliseconds for the start of the linear back-off where the
  *    client sleeps between attempts at retrying a credential transaction.
- *  Ensure (MUNGE_SOCKET_RETRY_ATTEMPTS * MUNGE_SOCKET_RETRY_USECS) < 1e6.
  */
-#define MUNGE_SOCKET_RETRY_USECS        10000
+#define MUNGE_SOCKET_RETRY_MSECS        10
 
-/*  Number of milliseconds until a client connection is timed-out.
+/*  Number of milliseconds until a socket read/write is timed-out.
  */
-#define MUNGE_SOCKET_TIMEOUT_MSECS      3000
+#define MUNGE_SOCKET_TIMEOUT_MSECS      2000
 
 /*  Number of threads to create for processing credential requests.
  */
@@ -203,27 +227,6 @@
 /*  String specifying the pathname of the secret key file.
  */
 #define MUNGED_SECRET_KEY               X_SYSCONFDIR "/munge/munge.key"
-
-/*  String specifying the pathname of the random number source device to use
- *    in case the MUNGED_RANDOM_SEED file contains insufficient entropy.
- */
-#define RANDOM_SEED_DEVICE              "/dev/urandom"
-
-/*  Integer for the number of bytes to read from the RANDOM_SEED_DEVICE when
- *    stirring the PRNG entropy pool.
- */
-#define RANDOM_SEED_STIR_BYTES          16
-
-/*  Integer for the maximum number of seconds between stirrings of the PRNG
- *    entropy pool once the exponential backoff completes.
- */
-#define RANDOM_SEED_STIR_MAX_SECS       3600
-
-/*  Integer for the minimum number of seconds between stirrings of the PRNG
- *    entropy pool from which the exponential backoff starts.
- *  If set to 0, the timer for repeated stirrings will be disabled.
- */
-#define RANDOM_SEED_STIR_MIN_SECS       1
 
 
 #endif /* !MUNGE_DEFS_H */

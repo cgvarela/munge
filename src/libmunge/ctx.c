@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -155,7 +155,7 @@ munge_ctx_strerror (munge_ctx_t ctx)
 
 
 munge_err_t
-munge_ctx_get (munge_ctx_t ctx, munge_opt_t opt, ...)
+munge_ctx_get (munge_ctx_t ctx, int opt, ...)
 {
     int             *p2int;
     char           **p2str;
@@ -229,7 +229,7 @@ munge_ctx_get (munge_ctx_t ctx, munge_opt_t opt, ...)
 
 
 munge_err_t
-munge_ctx_set (munge_ctx_t ctx, munge_opt_t opt, ...)
+munge_ctx_set (munge_ctx_t ctx, int opt, ...)
 {
     char        *str;
     char        *p;
@@ -275,8 +275,7 @@ munge_ctx_set (munge_ctx_t ctx, munge_opt_t opt, ...)
             break;
         case MUNGE_OPT_TTL:
             i = va_arg (vargs, int);
-            ctx->ttl = (i < 0) ? -1 : i;
-            /*  Note signed to unsigned conversion here.  */
+            ctx->ttl = (i == -1) ? MUNGE_TTL_MAXIMUM : i;
             break;
         case MUNGE_OPT_SOCKET:
             str = va_arg (vargs, char *);

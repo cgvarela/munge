@@ -1,0 +1,43 @@
+{
+    crypto_init-libgcrypt-malloc
+    Memcheck:Leak
+    match-leak-kinds: reachable
+    fun:malloc
+    ...
+    obj:*/libgcrypt.so.*
+    fun:crypto_init
+    fun:main
+}
+
+{
+    getgrent_r-calloc-and-malloc
+    Memcheck:Leak
+    match-leak-kinds: reachable
+    ...
+    fun:dlerror_run
+    fun:__libc_dlopen_mode
+    fun:nss_load_library
+    fun:__nss_lookup_function
+    fun:__nss_next2
+    fun:__nss_getent_r
+    fun:getgrent_r@@GLIBC_2.2.5
+    fun:xgetgrent
+    fun:_gids_map_create
+    fun:_gids_map_update
+    fun:_timer_thread
+    fun:start_thread
+    fun:clone
+}
+
+{
+    random_init-gcry_control-malloc
+    Memcheck:Leak
+    match-leak-kinds: reachable
+    fun:malloc
+    ...
+    fun:gcry_control
+    fun:_random_add
+    fun:_random_read_entropy_from_kernel
+    fun:random_init
+    fun:main
+}

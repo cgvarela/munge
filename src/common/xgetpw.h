@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -26,10 +26,10 @@
  *****************************************************************************/
 
 
-#ifndef XGETGRENT_H
-#define XGETGRENT_H
+#ifndef XGETPW_H
+#define XGETPW_H
 
-#include <grp.h>
+#include <pwd.h>
 #include <stddef.h>
 
 
@@ -37,24 +37,20 @@
  *  Data Types
  *****************************************************************************/
 
-typedef struct xgrbuf_t * xgrbuf_p;
+typedef struct xpwbuf_t * xpwbuf_p;
 
 
 /*****************************************************************************
  *  Functions
  *****************************************************************************/
 
-xgrbuf_p xgetgrent_buf_create (size_t len);
+xpwbuf_p xgetpwbuf_create (size_t len);
 
-void xgetgrent_buf_destroy (xgrbuf_p grbufp);
+void xgetpwbuf_destroy (xpwbuf_p pwbufp);
 
-size_t xgetgrent_buf_get_len (xgrbuf_p grbufp);
+size_t xgetpwbuf_get_len (xpwbuf_p pwbufp);
 
-void xgetgrent_init (void);
-
-int xgetgrent (struct group *grp, xgrbuf_p grbufp);
-
-void xgetgrent_fini (void);
+int xgetpwnam (const char *name, struct passwd *pwp, xpwbuf_p pwbufp);
 
 
-#endif /* !XGETGRENT_H */
+#endif /* !XGETPW_H */

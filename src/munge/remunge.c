@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -32,10 +32,8 @@
 
 #include <assert.h>
 #include <errno.h>
-#include <grp.h>
 #include <limits.h>
 #include <pthread.h>
-#include <pwd.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,9 +42,11 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <munge.h>
+#include "common.h"
 #include "license.h"
 #include "log.h"
 #include "posignal.h"
+#include "query.h"
 #include "version.h"
 
 
@@ -222,6 +222,7 @@ main (int argc, char *argv[])
     stop_threads (conf);
 
     destroy_conf (conf);
+    log_close_file ();
     exit (EMUNGE_SUCCESS);
 }
 
@@ -366,8 +367,6 @@ parse_cmdline (conf_t conf, int argc, char **argv)
     long int       l;
     unsigned long  u;
     int            multiplier;
-    struct passwd *pw_ptr;
-    struct group  *gr_ptr;
     munge_err_t    e;
 
     opterr = 0;                         /* suppress default getopt err msgs */
@@ -477,20 +476,9 @@ parse_cmdline (conf_t conf, int argc, char **argv)
                 conf->num_payload = (int) (l * multiplier);
                 break;
             case 'u':
-                if ((pw_ptr = getpwnam (optarg)) != NULL) {
-                    i = pw_ptr->pw_uid;
-                }
-                else {
-                    errno = 0;
-                    l = strtol (optarg, &p, 10);
-                    if (((errno == ERANGE)
-                                && ((l == LONG_MIN) || (l == LONG_MAX)))
-                            || (optarg == p) || (*p != '\0')
-                            || (l < 0) || (l > INT_MAX)) {
-                        log_err (EMUNGE_SNAFU, LOG_ERR,
-                            "Unrecognized user \"%s\"", optarg);
-                    }
-                    i = (int) l;
+                if (query_uid (optarg, (uid_t *) &i) < 0) {
+                    log_err (EMUNGE_SNAFU, LOG_ERR,
+                        "Unrecognized user \"%s\"", optarg);
                 }
                 e = munge_ctx_set (conf->ctx, MUNGE_OPT_UID_RESTRICTION, i);
                 if (e != EMUNGE_SUCCESS) {
@@ -500,20 +488,9 @@ parse_cmdline (conf_t conf, int argc, char **argv)
                 }
                 break;
             case 'g':
-                if ((gr_ptr = getgrnam (optarg)) != NULL) {
-                    i = gr_ptr->gr_gid;
-                }
-                else {
-                    errno = 0;
-                    l = strtol (optarg, &p, 10);
-                    if (((errno == ERANGE)
-                                && ((l == LONG_MIN) || (l == LONG_MAX)))
-                            || (optarg == p) || (*p != '\0')
-                            || (l < 0) || (l > INT_MAX)) {
-                        log_err (EMUNGE_SNAFU, LOG_ERR,
-                            "Unrecognized group \"%s\"", optarg);
-                    }
-                    i = (int) l;
+                if (query_gid (optarg, (gid_t *) &i) < 0) {
+                    log_err (EMUNGE_SNAFU, LOG_ERR,
+                        "Unrecognized group \"%s\"", optarg);
                 }
                 e = munge_ctx_set (conf->ctx, MUNGE_OPT_GID_RESTRICTION, i);
                 if (e != EMUNGE_SUCCESS) {
@@ -525,16 +502,21 @@ parse_cmdline (conf_t conf, int argc, char **argv)
             case 't':
                 errno = 0;
                 l = strtol (optarg, &p, 10);
-                if ((optarg == p) || (*p != '\0')) {
+                if ((optarg == p) || (*p != '\0') || (l < -1)) {
                     log_err (EMUNGE_SNAFU, LOG_ERR,
                         "Invalid time-to-live '%s'", optarg);
                 }
-                if (((errno == ERANGE) && (l == LONG_MAX)) || (l > INT_MAX)) {
+                if ((errno == ERANGE) && (l == LONG_MAX)) {
                     log_err (EMUNGE_SNAFU, LOG_ERR,
-                        "Exceeded maximum time-to-live of %d seconds",
-                        INT_MAX);
+                        "Overflowed maximum time-to-live of %ld seconds",
+                        LONG_MAX);
                 }
-                if (l < 0) {
+                if (l > UINT_MAX) {
+                    log_err (EMUNGE_SNAFU, LOG_ERR,
+                        "Exceeded maximum time-to-live of %u seconds",
+                        UINT_MAX);
+                }
+                if (l == -1) {
                     l = MUNGE_TTL_MAXIMUM;
                 }
                 e = munge_ctx_set (conf->ctx, MUNGE_OPT_TTL, (int) l);

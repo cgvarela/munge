@@ -2,12 +2,12 @@
 ## Process this file with automake to produce Makefile.in.
 ##*****************************************************************************
 ## Written by Chris Dunlap <cdunlap@llnl.gov>.
-## Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+## Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
 ## Copyright (C) 2002-2007 The Regents of the University of California.
 ## UCRL-CODE-155910.
 ##
 ## This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
-## For details, see <https://munge.googlecode.com/>.
+## For details, see <https://dun.github.io/munge/>.
 ##
 ## MUNGE is free software: you can redistribute it and/or modify it under
 ## the terms of the GNU General Public License as published by the Free
@@ -40,3 +40,11 @@ libmissing_la_SOURCES = \
 	getopt.c \
 	getopt1.c \
 	missing.h
+
+EXTRA_libmissing_la_SOURCES = \
+	inet_ntop.h \
+	strlcat.h \
+	strlcpy.h
+
+EXTRA_DIST = \
+	URL

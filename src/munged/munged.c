@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -52,7 +52,9 @@
 #include "conf.h"
 #include "crypto.h"
 #include "gids.h"
+#include "hash.h"
 #include "job.h"
+#include "lock.h"
 #include "log.h"
 #include "missing.h"
 #include "munge_defs.h"
@@ -69,7 +71,7 @@
  *****************************************************************************/
 
 static void disable_core_dumps (void);
-static int daemonize_init (char *progname);
+static int daemonize_init (char *progname, conf_t conf);
 static void daemonize_fini (int fd);
 static void open_logfile (const char *logfile, int priority, int got_force);
 static void handle_signals (void);
@@ -78,9 +80,6 @@ static void exit_handler (int signum);
 static void write_pidfile (const char *pidfile, int got_force);
 static void lock_memory (void);
 static void sock_create (conf_t conf);
-static void sock_lock (conf_t conf);
-static int set_file_lock (int fd);
-static pid_t is_file_locked (int fd);
 static void sock_destroy (conf_t conf);
 
 
@@ -116,9 +115,9 @@ main (int argc, char *argv[])
         conf->got_force);
 
     if (!conf->got_foreground) {
-        fd = daemonize_init (argv[0]);
+        fd = daemonize_init (argv[0], conf);
         if (conf->got_syslog) {
-            log_open_file (NULL, NULL, 0, 0);
+            log_close_file ();
             log_open_syslog (log_identity, LOG_DAEMON);
         }
         else {
@@ -127,7 +126,6 @@ main (int argc, char *argv[])
     }
     handle_signals ();
     lookup_ip_addr (conf);
-    write_pidfile (conf->pidfile_name, conf->got_force);
     if (conf->got_mlockall) {
         lock_memory ();
     }
@@ -143,6 +141,7 @@ main (int argc, char *argv[])
     replay_init ();
     timer_init ();
     sock_create (conf);
+    write_pidfile (conf->pidfile_name, conf->got_force);
 
     if (!conf->got_foreground) {
         daemonize_fini (fd);
@@ -156,12 +155,14 @@ main (int argc, char *argv[])
     timer_fini ();
     replay_fini ();
     gids_destroy (conf->gids);
+    hash_drop_memory ();
     random_fini (conf->seed_name);
     crypto_fini ();
-    destroy_conf (conf);
+    destroy_conf (conf, 1);
 
     log_msg (LOG_NOTICE, "Stopping %s daemon (pid %d)",
         META_ALIAS, (int) getpid ());
+    log_close_all ();
 
     exit (EMUNGE_SUCCESS);
 }
@@ -187,7 +188,7 @@ disable_core_dumps (void)
 
 
 static int
-daemonize_init (char *progname)
+daemonize_init (char *progname, conf_t conf)
 {
 /*  Begins the daemonization of the process.
  *  Despite the fact that this routine backgrounds the process, control
@@ -243,6 +244,8 @@ daemonize_init (char *progname)
             }
             exit (EXIT_FAILURE);
         }
+        destroy_conf (conf, 0);
+        log_close_all ();
         exit (EXIT_SUCCESS);
     }
     if (close (fds[0]) < 0) {
@@ -270,6 +273,8 @@ daemonize_init (char *progname)
             "Failed to create grandchild process");
     }
     else if (pid > 0) {
+        destroy_conf (conf, 0);
+        log_close_all ();
         exit (EXIT_SUCCESS);
     }
     return (fds[1]);
@@ -308,7 +313,7 @@ daemonize_fini (int fd)
         log_errno (EMUNGE_SNAFU, LOG_ERR,
             "Failed to dup \"/dev/null\" onto stderr");
     }
-    if (close (dev_null) < 0) {
+    if ((dev_null > STDERR_FILENO) && (close (dev_null)) < 0) {
         log_errno (EMUNGE_SNAFU, LOG_ERR, "Failed to close \"/dev/null\"");
     }
     /*  Clear the fd used by log_err() to return status back to the parent.
@@ -397,7 +402,8 @@ open_logfile (const char *logfile, int priority, int got_force)
         log_err (EMUNGE_SNAFU, LOG_ERR,
             "Failed to determine dirname of logfile \"%s\"", logfile);
     }
-    n = path_is_secure (logdir, ebuf, sizeof (ebuf));
+    n = path_is_secure (logdir, ebuf, sizeof (ebuf),
+        PATH_SECURITY_IGNORE_GROUP_WRITE);
     if (n < 0) {
         log_err (EMUNGE_SNAFU, LOG_ERR,
             "Failed to check logfile dir \"%s\": %s", logdir, ebuf);
@@ -470,6 +476,10 @@ write_pidfile (const char *pidfile, int got_force)
 {
 /*  Creates the specified pidfile.
  *  The pidfile must be created after the daemon has finished forking.
+ *    It should be written after validation checks that might prevent the
+ *    daemon from starting (e.g., after creating the socket and obtaining
+ *    the lock), but before the original parent process terminates (i.e.,
+ *    before daemonize_fini()).
  */
     char    piddir [PATH_MAX];
     char    ebuf [1024];
@@ -493,7 +503,7 @@ write_pidfile (const char *pidfile, int got_force)
         log_err (EMUNGE_SNAFU, LOG_ERR,
             "Failed to determine dirname of pidfile \"%s\"", pidfile);
     }
-    n = path_is_secure (piddir, ebuf, sizeof (ebuf));
+    n = path_is_secure (piddir, ebuf, sizeof (ebuf), PATH_SECURITY_NO_FLAGS);
     if (n < 0) {
         log_err (EMUNGE_SNAFU, LOG_ERR,
             "Failed to check pidfile dir \"%s\": %s", piddir, ebuf);
@@ -591,7 +601,7 @@ sock_create (conf_t conf)
         log_err (EMUNGE_SNAFU, LOG_ERR,
             "Failed to determine dirname of socket \"%s\"", conf->socket_name);
     }
-    n = path_is_secure (sockdir, ebuf, sizeof (ebuf));
+    n = path_is_secure (sockdir, ebuf, sizeof (ebuf), PATH_SECURITY_NO_FLAGS);
     if (n < 0) {
         log_err (EMUNGE_SNAFU, LOG_ERR,
             "Failed to check socket dir \"%s\": %s", sockdir, ebuf);
@@ -617,9 +627,19 @@ sock_create (conf_t conf)
     }
     /*  Create lockfile for exclusive access to the socket.
      */
-    sock_lock (conf);
+    lock_create (conf);
     /*
-     *  Create socket for communicating with clients.
+     *  Remove existing socket from previous instance.
+     */
+    if (unlink (conf->socket_name) == 0) {
+        log_msg (LOG_INFO, "Removed existing socket \"%s\"",
+            conf->socket_name);
+    }
+    else if (errno != ENOENT) {
+        log_errno (EMUNGE_SNAFU, LOG_ERR, "Failed to remove \"%s\"",
+            conf->socket_name);
+    }
+    /*  Create socket for communicating with clients.
      */
     if ((sd = socket (PF_UNIX, SOCK_STREAM, 0)) < 0) {
         log_errno (EMUNGE_SNAFU, LOG_ERR, "Failed to create socket");
@@ -646,159 +666,8 @@ sock_create (conf_t conf)
             "Failed to listen on \"%s\"", conf->socket_name);
     }
     conf->ld = sd;
+    log_msg (LOG_NOTICE, "Bound to socket \"%s\"", conf->socket_name);
     return;
-}
-
-
-static void
-sock_lock (conf_t conf)
-{
-/*  Ensures exclusive access to the unix domain socket.
- */
-    struct stat  st;
-    mode_t       mask;
-    int          rv;
-
-    assert (conf != NULL);
-    assert (conf->lockfile_name == NULL);
-    assert (conf->lockfile_fd == -1);
-    assert (conf->socket_name != NULL);
-
-    if (!(conf->lockfile_name = strdupf ("%s.lock", conf->socket_name))) {
-        log_errno (EMUNGE_NO_MEMORY, LOG_ERR,
-            "Failed to create lockfile string");
-    }
-    if (conf->got_force) {
-        if ((unlink (conf->lockfile_name) < 0) && (errno != ENOENT)) {
-            log_errno (EMUNGE_SNAFU, LOG_ERR, "Failed to remove \"%s\"",
-                conf->lockfile_name);
-        }
-    }
-    else if (lstat (conf->lockfile_name, &st) < 0) {
-        if (errno != ENOENT) {
-            log_errno (EMUNGE_SNAFU, LOG_ERR, "Failed to stat \"%s\"",
-                conf->lockfile_name);
-        }
-    }
-    else if (!S_ISREG(st.st_mode)) {
-        log_err (EMUNGE_SNAFU, LOG_ERR,
-            "Lockfile is suspicious: \"%s\" should be a regular file",
-            conf->lockfile_name);
-    }
-    else if (st.st_uid != geteuid()) {
-        log_err (EMUNGE_SNAFU, LOG_ERR,
-            "Lockfile is suspicious: \"%s\" should be owned by UID %u",
-            conf->lockfile_name, (unsigned) geteuid());
-    }
-    else if ((st.st_mode & 07777) != S_IWUSR) {
-        log_err (EMUNGE_SNAFU, LOG_ERR,
-            "Lockfile is suspicious: \"%s\" should be writable only by user",
-            conf->lockfile_name);
-    }
-    mask = umask (0);
-    conf->lockfile_fd = creat (conf->lockfile_name, S_IWUSR);
-    umask (mask);
-
-    if (conf->lockfile_fd < 0) {
-        log_errno (EMUNGE_SNAFU, LOG_ERR,
-            "Failed to create \"%s\"", conf->lockfile_name);
-    }
-    if ((rv = set_file_lock (conf->lockfile_fd)) < 0) {
-        if (!conf->got_force)
-            log_errno (EMUNGE_SNAFU, LOG_ERR,
-                "Failed to lock \"%s\"", conf->lockfile_name);
-        else
-            log_msg (LOG_WARNING,
-                "Failed to lock \"%s\"", conf->lockfile_name);
-    }
-    else if (rv > 0) {
-
-        pid_t pid = is_file_locked (conf->lockfile_fd);
-
-        if (pid < 0) {
-            log_errno (EMUNGE_SNAFU, LOG_ERR,
-                "Failed to test lock \"%s\"", conf->lockfile_name);
-        }
-        else if (pid > 0) {
-            log_err (EMUNGE_SNAFU, LOG_ERR,
-                "Found pid %d bound to socket \"%s\"", pid, conf->socket_name);
-        }
-        else {
-            log_err (EMUNGE_SNAFU, LOG_ERR,
-                "Found inconsistent state for lock \"%s\"",
-                conf->lockfile_name);
-        }
-    }
-    if (unlink (conf->socket_name) == 0) {
-        log_msg (LOG_INFO, "Removed existing socket \"%s\"",
-            conf->socket_name);
-    }
-    else if (errno != ENOENT) {
-        log_errno (EMUNGE_SNAFU, LOG_ERR, "Failed to remove \"%s\"",
-            conf->socket_name);
-    }
-    return;
-}
-
-
-static int
-set_file_lock (int fd)
-{
-/*  Sets an exclusive advisory lock on the open file descriptor 'fd'.
- *  Returns 0 on success, 1 if a conflicting lock is held by another process,
- *    or -1 on error (with errno set).
- */
-    struct flock  fl;
-    int           rv;
-
-    if (fd < 0) {
-        errno = EBADF;
-        return (-1);
-    }
-    fl.l_type = F_WRLCK;
-    fl.l_whence = SEEK_SET;
-    fl.l_start = 0;
-    fl.l_len = 0;
-
-    rv = fcntl (fd, F_SETLK, &fl);
-    if (rv < 0) {
-        if ((errno == EACCES) || (errno == EAGAIN)) {
-            return (1);
-        }
-        return (-1);
-    }
-    return (0);
-}
-
-
-static pid_t
-is_file_locked (int fd)
-{
-/*  Tests whether an exclusive advisory lock could be obtained for the open
- *    file descriptor 'fd'.
- *  Returns 0 if the file is not locked, >0 for the pid of another process
- *    holding a conflicting lock, or -1 on error (with errno set).
- */
-    struct flock  fl;
-    int           rv;
-
-    if (fd < 0) {
-        errno = EBADF;
-        return (-1);
-    }
-    fl.l_type = F_WRLCK;
-    fl.l_whence = SEEK_SET;
-    fl.l_start = 0;
-    fl.l_len = 0;
-
-    rv = fcntl (fd, F_GETLK, &fl);
-    if (rv < 0) {
-        return (-1);
-    }
-    if (fl.l_type == F_UNLCK) {
-        return (0);
-    }
-    return (fl.l_pid);
 }
 
 

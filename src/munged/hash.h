@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -26,8 +26,8 @@
  *****************************************************************************/
 
 
-#ifndef LSD_HASH_H
-#define LSD_HASH_H
+#ifndef HASH_H
+#define HASH_H
 
 
 /*****************************************************************************
@@ -36,19 +36,6 @@
 /*
  *  If an item's key is modified after insertion, the hash will be unable to
  *  locate it if the new key should hash to a different slot in the table.
- *
- *  If NDEBUG is not defined, internal debug code will be enabled; this is
- *  intended for development use only.  Production code should define NDEBUG.
- *
- *  If WITH_LSD_FATAL_ERROR_FUNC is defined, the linker will expect to
- *  find an external lsd_fatal_error(file,line,mesg) function.  By default,
- *  lsd_fatal_error(file,line,mesg) is a macro definition that aborts.
- *  This macro may be redefined to invoke another routine instead.
- *
- *  If WITH_LSD_NOMEM_ERROR_FUNC is defined, the linker will expect to
- *  find an external lsd_nomem_error(file,line,mesg) function.  By default,
- *  lsd_nomem_error(file,line,mesg) is a macro definition that returns NULL.
- *  This macro may be redefined to invoke another routine instead.
  *
  *  If WITH_PTHREADS is defined, these routines will be thread-safe.
  */
@@ -72,7 +59,9 @@ typedef unsigned int (*hash_key_f) (const void *key);
 typedef int (*hash_cmp_f) (const void *key1, const void *key2);
 /*
  *  Function prototype for comparing two keys.
- *  Returns zero if both keys are equal; o/w, returns nonzero.
+ *  Returns an integer that is less than zero if [key1] is less than [key2],
+ *    equal to zero if [key1] is equal to [key2], and greater than zero if
+ *    [key1] is greater than [key2].
  */
 
 typedef void (*hash_del_f) (void *data);
@@ -98,8 +87,8 @@ hash_t hash_create (int size,
     hash_key_f key_f, hash_cmp_f cmp_f, hash_del_f del_f);
 /*
  *  Creates and returns a new hash table on success.
- *    Returns lsd_nomem_error() with errno=ENOMEM if memory allocation fails.
  *    Returns NULL with errno=EINVAL if [keyf] or [cmpf] is not specified.
+ *    Returns NULL with errno=ENOMEM if memory allocation fails.
  *  The [size] is the number of slots in the table; a larger table requires
  *    more memory, but generally provide quicker access times.  If set <= 0,
  *    the default size is used.
@@ -126,12 +115,14 @@ void hash_reset (hash_t h);
 
 int hash_is_empty (hash_t h);
 /*
- *  Returns non-zero if hash table [h] is empty; o/w, returns zero.
+ *  Returns 1 if hash table [h] is empty, or 0 if not empty.
+ *    Returns -1 with errno=EINVAL if [h] is NULL.
  */
 
 int hash_count (hash_t h);
 /*
  *  Returns the number of items in hash table [h].
+ *    Returns -1 with errno=EINVAL if [h] is NULL.
  */
 
 void * hash_find (hash_t h, const void *key);
@@ -149,7 +140,7 @@ void * hash_insert (hash_t h, const void *key, void *data);
  *  Returns a ptr to the inserted item's data on success.
  *    Returns NULL with errno=EEXIST if [key] already exists in the hash.
  *    Returns NULL with errno=EINVAL if [key] or [data] is not specified.
- *    Returns lsd_nomem_error() with errno=ENOMEM if memory allocation fails.
+ *    Returns NULL with errno=ENOMEM if memory allocation fails.
  */
 
 void * hash_remove (hash_t h, const void *key);
@@ -183,5 +174,14 @@ unsigned int hash_key_string (const char *str);
  *  A hash_key_f function that hashes the string [str].
  */
 
+void hash_drop_memory (void);
+/*
+ *  Frees memory that has been internally allocated.  No reference counting is
+ *    performed to determine whether memory regions are still in use.
+ *  This may be useful for explicitly de-allocating memory before program
+ *    termination when checking for memory leaks.
+ *  WARNING: Do not call this routine until ALL hashes have been destroyed.
+ */
 
-#endif /* !LSD_HASH_H */
+
+#endif /* !HASH_H */

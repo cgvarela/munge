@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -46,14 +46,10 @@ cred_create (m_msg_t m)
 
     assert (m != NULL);
 
-    if (!(c = malloc (sizeof (*c)))) {
+    if (!(c = calloc (1, sizeof (*c)))) {
         m_msg_set_err (m, EMUNGE_NO_MEMORY, NULL);
         return (NULL);
     }
-    /*  Init ints to 0, chars to \0, ptrs to NULL.
-     */
-    memset (c, 0, sizeof (*c));
-
     c->version = MUNGE_CRED_VERSION;
     c->msg = m;
     return (c);

@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -106,15 +106,15 @@ int base64_cleanup (base64_ctx *x);
 
 int base64_encode_block (void *dst, int *dstlen, const void *src, int srclen);
 /*
- *  Base64-encodes [srclen] bytes from the contiguous [src] into [dst].
- *    If [dstlen] is not NULL, it will be set to the number of bytes written.
+ *  Base64-encodes [srclen] bytes from the contiguous [src] into [dst],
+ *    and sets [dstlen] to the number of bytes written.
  *  Returns 0 on success, or -1 on error.
  */
 
 int base64_decode_block (void *dst, int *dstlen, const void *src, int srclen);
 /*
- *  Base64-decodes [srclen] bytes from the contiguous [src] into [dst].
- *    If [dstlen] is not NULL, it will be set to the number of bytes written.
+ *  Base64-decodes [srclen] bytes from the contiguous [src] into [dst],
+ *    and sets [dstlen] to the number of bytes written.
  *  Returns 0 on success, or -1 on error.
  */
 

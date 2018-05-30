@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -39,9 +39,23 @@
 #elif HAVE_GETGRENT_R_SUN
 #define HAVE_GETGRENT_R_ERANGE_BROKEN 1
 #elif HAVE_GETGRENT
+#ifdef WITH_PTHREADS
 #include <pthread.h>
+#endif /* WITH_PTHREADS */
 #else
 #error "getgrent() not supported"
+#endif
+
+#if   HAVE_GETGRNAM_R_POSIX
+#define _POSIX_PTHREAD_SEMANTICS 1      /* for SunOS */
+#elif HAVE_GETGRNAM_R_SUN
+#undef _POSIX_PTHREAD_SEMANTICS
+#elif HAVE_GETGRNAM
+#ifdef WITH_PTHREADS
+#include <pthread.h>
+#endif /* WITH_PTHREADS */
+#else
+#error "getgrnam() not supported"
 #endif
 
 #include <assert.h>
@@ -54,7 +68,7 @@
 #include <unistd.h>
 #include <munge.h>
 #include "log.h"
-#include "xgetgrent.h"
+#include "xgetgr.h"
 
 
 /*****************************************************************************
@@ -98,14 +112,14 @@ static FILE *_gr_fp;
  *  Private Prototypes
  *****************************************************************************/
 
-static size_t _xgetgrent_buf_get_sys_size (void);
+static size_t _xgetgrbuf_get_sys_size (void);
 
-static int _xgetgrent_buf_grow (xgrbuf_p grbufp, size_t minlen);
+static int _xgetgrbuf_grow (xgrbuf_p grbufp, size_t minlen);
 
-static int _xgetgrent_copy (const struct group *src, struct group *dst,
+static int _xgetgrbuf_copy_struct (const struct group *src, struct group *dst,
     xgrbuf_p grbufp) _UNUSED_;
 
-static int _xgetgrent_copy_str (const char *src, char **dstp,
+static int _xgetgrbuf_copy_string (const char *src, char **dstp,
     char **bufp, size_t *buflenp) _UNUSED_;
 
 
@@ -114,7 +128,7 @@ static int _xgetgrent_copy_str (const char *src, char **dstp,
  *****************************************************************************/
 
 xgrbuf_p
-xgetgrent_buf_create (size_t len)
+xgetgrbuf_create (size_t len)
 {
 /*  Allocates a buffer for xgetgrent().  [len] specifies a suggested size
  *    for the buffer; if 0, the system recommended size will be used.
@@ -123,7 +137,7 @@ xgetgrent_buf_create (size_t len)
     xgrbuf_p grbufp;
 
     if (len == 0) {
-        len = _xgetgrent_buf_get_sys_size ();
+        len = _xgetgrbuf_get_sys_size ();
     }
     grbufp = malloc (sizeof (struct xgrbuf_t));
     if (grbufp == NULL) {
@@ -141,7 +155,7 @@ xgetgrent_buf_create (size_t len)
 
 
 void
-xgetgrent_buf_destroy (xgrbuf_p grbufp)
+xgetgrbuf_destroy (xgrbuf_p grbufp)
 {
 /*  Destroys the buffer [grbufp].
  */
@@ -156,7 +170,7 @@ xgetgrent_buf_destroy (xgrbuf_p grbufp)
 
 
 size_t
-xgetgrent_buf_get_len (xgrbuf_p grbufp)
+xgetgrbuf_get_len (xgrbuf_p grbufp)
 {
 /*  Returns the current size of the allocated buffer within [grbufp],
  *    or 0 on error (with errno).
@@ -201,11 +215,13 @@ xgetgrent (struct group *grp, xgrbuf_p grbufp)
 #elif HAVE_GETGRENT_R_SUN
     struct group           *rv_grp;
 #elif HAVE_GETGRENT
+#ifdef WITH_PTHREADS
     static pthread_mutex_t  mutex = PTHREAD_MUTEX_INITIALIZER;
     int                     rv_mutex;
+#endif /* WITH_PTHREADS */
     int                     rv_copy;
     struct group           *rv_grp;
-#endif
+#endif /* HAVE_GETGRENT */
     int                     got_eof;
     int                     got_err;
 
@@ -222,6 +238,7 @@ restart:
     got_err = 0;
 
 #if   HAVE_GETGRENT_R_GNU
+    rv_grp = NULL;
     rv = getgrent_r (grp, grbufp->buf, grbufp->len, &rv_grp);
     if (((rv == ENOENT) || (rv == 0)) && (rv_grp == NULL)) {
         got_eof = 1;
@@ -251,10 +268,12 @@ restart:
         }
     }
 #elif HAVE_GETGRENT
+#ifdef WITH_PTHREADS
     if ((rv_mutex = pthread_mutex_lock (&mutex)) != 0) {
         errno = rv_mutex;
         log_errno (EMUNGE_SNAFU, LOG_ERR, "Failed to lock xgetgrent mutex");
     }
+#endif /* WITH_PTHREADS */
     rv_grp = getgrent ();
     if (rv_grp == NULL) {
         if ((errno == 0) || (errno == ENOENT)) {
@@ -263,18 +282,21 @@ restart:
         else {
             got_err = 1;
         }
+        rv_copy = 0;
     }
     else {
-        rv_copy = _xgetgrent_copy (rv_grp, grp, grbufp);
+        rv_copy = _xgetgrbuf_copy_struct (rv_grp, grp, grbufp);
     }
+#ifdef WITH_PTHREADS
     if ((rv_mutex = pthread_mutex_unlock (&mutex)) != 0) {
         errno = rv_mutex;
         log_errno (EMUNGE_SNAFU, LOG_ERR, "Failed to unlock xgetgrent mutex");
     }
+#endif /* WITH_PTHREADS */
     if (rv_copy < 0) {
         return (-1);
     }
-#endif
+#endif /* HAVE_GETGRENT */
 
     if (got_eof) {
         errno = ENOENT;
@@ -282,7 +304,7 @@ restart:
     }
     if (got_err) {
         if (errno == ERANGE) {
-            rv = _xgetgrent_buf_grow (grbufp, 0);
+            rv = _xgetgrbuf_grow (grbufp, 0);
 #if ! HAVE_GETGRENT_R_ERANGE_BROKEN
             if (rv == 0) {
                 goto restart;
@@ -305,14 +327,168 @@ xgetgrent_fini (void)
 }
 
 
+int
+xgetgrnam (const char *name, struct group *grp, xgrbuf_p grbufp)
+{
+/*  Portable encapsulation of getgrnam_r().
+ */
+#if   HAVE_GETGRNAM_R_POSIX
+    struct group           *rv_grp;
+#elif HAVE_GETGRNAM_R_SUN
+    struct group           *rv_grp;
+#elif HAVE_GETGRNAM
+#ifdef WITH_PTHREADS
+    static pthread_mutex_t  mutex = PTHREAD_MUTEX_INITIALIZER;
+    int                     rv_mutex;
+#endif /* WITH_PTHREADS */
+    int                     rv_copy;
+    struct group           *rv_grp;
+#endif /* HAVE_GETGRNAM */
+    int                     rv;
+    int                     got_err;
+    int                     got_none;
+
+    if ((name == NULL)    ||
+        (name[0] == '\0') ||
+        (grp == NULL)     ||
+        (grbufp == NULL))
+    {
+        errno = EINVAL;
+        return (-1);
+    }
+    assert (grbufp->buf != NULL);
+    assert (grbufp->len > 0);
+
+restart:
+    errno = 0;
+    got_err = 0;
+    got_none = 0;
+
+#if   HAVE_GETGRNAM_R_POSIX
+    rv_grp = NULL;
+    rv = getgrnam_r (name, grp, grbufp->buf, grbufp->len, &rv_grp);
+    /*
+     *  POSIX.1-2001 does not call "name not found" an error, so the return
+     *    value of getgrnam_r() is of limited value.  When errors do occur,
+     *    some systems return them via the retval and some via errno.
+     */
+    if (rv_grp == NULL) {
+        /*
+         *  Coalesce the error number onto rv if needed.
+         */
+        if ((rv <= 0) && (errno != 0)) {
+            rv = errno;
+        }
+        /*  Likely that the name was not found.
+         */
+        if ((rv == 0)      ||
+            (rv == ENOENT) ||
+            (rv == ESRCH))
+        {
+            got_none = 1;
+        }
+        /*  Likely that an error occurred.
+         */
+        else if (
+            (rv == EINTR)  ||
+            (rv == ERANGE) ||
+            (rv == EIO)    ||
+            (rv == EMFILE) ||
+            (rv == ENFILE))
+        {
+            got_err = 1;
+            errno = rv;
+        }
+        /*  Unable to distinguish "name not found" from error.
+         */
+        else {
+            got_none = 1;
+        }
+    }
+#elif HAVE_GETGRNAM_R_SUN
+    rv_grp = getgrnam_r (name, grp, grbufp->buf, grbufp->len);
+    if (rv_grp == NULL) {
+        if (errno == 0) {
+            got_none = 1;
+        }
+        else {
+            got_err = 1;
+        }
+    }
+#elif HAVE_GETGRNAM
+#ifdef WITH_PTHREADS
+    if ((rv_mutex = pthread_mutex_lock (&mutex)) != 0) {
+        errno = rv_mutex;
+        log_errno (EMUNGE_SNAFU, LOG_ERR, "Failed to lock xgetgrnam mutex");
+    }
+#endif /* WITH_PTHREADS */
+    rv_grp = getgrnam (name);
+    /*
+     *  The initial test for (errno != 0), while redundant, allows for the
+     *    "name not found" case to short-circuit the rest of the if-condition
+     *    on many systems.
+     */
+    if (rv_grp == NULL) {
+        if ((errno != 0) &&
+            ((errno == EINTR)  ||
+             (errno == ERANGE) ||
+             (errno == EIO)    ||
+             (errno == EMFILE) ||
+             (errno == ENFILE) ||
+             (errno == ENOMEM)))
+        {
+            got_err = 1;
+        }
+        else {
+            got_none = 1;
+        }
+        rv_copy = 0;
+    }
+    else {
+        rv_copy = _xgetgrbuf_copy_struct (rv_grp, grp, grbufp);
+    }
+#ifdef WITH_PTHREADS
+    if ((rv_mutex = pthread_mutex_unlock (&mutex)) != 0) {
+        errno = rv_mutex;
+        log_errno (EMUNGE_SNAFU, LOG_ERR, "Failed to unlock xgetgrnam mutex");
+    }
+#endif /* WITH_PTHREADS */
+    if (rv_copy < 0) {
+        return (-1);
+    }
+#endif /* HAVE_GETGRNAM */
+
+    if (got_none) {
+        errno = ENOENT;
+        return (-1);
+    }
+    if (got_err) {
+        if (errno == EINTR) {
+            goto restart;
+        }
+        if (errno == ERANGE) {
+            rv = _xgetgrbuf_grow (grbufp, 0);
+            if (rv == 0) {
+                goto restart;
+            }
+        }
+        return (-1);
+    }
+    /*  Some systems set errno even on success.  Go figure.
+     */
+    errno = 0;
+    return (0);
+}
+
+
 /*****************************************************************************
  *  Private Functions
  *****************************************************************************/
 
 static size_t
-_xgetgrent_buf_get_sys_size (void)
+_xgetgrbuf_get_sys_size (void)
 {
-/*  Returns the system recommended size for the xgetgrent() buffer.
+/*  Returns the system recommended size for the xgetgr buffer.
  */
     long   n = -1;
     size_t len;
@@ -329,7 +505,7 @@ _xgetgrent_buf_get_sys_size (void)
 
 
 static int
-_xgetgrent_buf_grow (xgrbuf_p grbufp, size_t minlen)
+_xgetgrbuf_grow (xgrbuf_p grbufp, size_t minlen)
 {
 /*  Grows the buffer [grbufp] to be at least as large as the length [minlen].
  *  Returns 0 on success, or -1 on error (with errno).
@@ -364,9 +540,10 @@ _xgetgrent_buf_grow (xgrbuf_p grbufp, size_t minlen)
 
 
 static int
-_xgetgrent_copy (const struct group *src, struct group *dst, xgrbuf_p grbufp)
+_xgetgrbuf_copy_struct (const struct group *src, struct group *dst,
+                        xgrbuf_p grbufp)
 {
-/*  Copies the group entry [src] into [dst], placing additional strings and
+/*  Copies the struct group [src] into [dst], placing additional strings and
  *    whatnot into the buffer [grbufp].
  *  Returns 0 on success, or -1 on error (with errno).
  */
@@ -402,7 +579,7 @@ _xgetgrent_copy (const struct group *src, struct group *dst, xgrbuf_p grbufp)
     /*  Ensure requisite buffer space.
      */
     if (grbufp->len < num_bytes) {
-        if (_xgetgrent_buf_grow (grbufp, num_bytes) < 0) {
+        if (_xgetgrbuf_grow (grbufp, num_bytes) < 0) {
             return (-1);
         }
     }
@@ -420,16 +597,16 @@ _xgetgrent_copy (const struct group *src, struct group *dst, xgrbuf_p grbufp)
     p += n;
     num_bytes -= n;
 
-    if (_xgetgrent_copy_str
+    if (_xgetgrbuf_copy_string
             (src->gr_name, &(dst->gr_name), &p, &num_bytes) < 0) {
         goto err;
     }
-    if (_xgetgrent_copy_str
+    if (_xgetgrbuf_copy_string
             (src->gr_passwd, &(dst->gr_passwd), &p, &num_bytes) < 0) {
         goto err;
     }
     for (i = 0; i < num_ptrs; i++) {
-        if (_xgetgrent_copy_str
+        if (_xgetgrbuf_copy_string
                 (src->gr_mem [i], &(dst->gr_mem [i]), &p, &num_bytes) < 0) {
             goto err;
         }
@@ -446,8 +623,8 @@ err:
 
 
 static int
-_xgetgrent_copy_str (const char *src, char **dstp,
-                     char **bufp, size_t *buflenp)
+_xgetgrbuf_copy_string (const char *src, char **dstp,
+                        char **bufp, size_t *buflenp)
 {
 /*  Copies the string [src] into the buffer [bufp] of size [buflenp],
  *    setting the pointer [dstp] to the newly-copied string.  The values

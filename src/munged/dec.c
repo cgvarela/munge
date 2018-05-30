@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -219,8 +219,8 @@ dec_check_retry (munge_cred_t c)
 
     if (m->retry > 0) {
         log_msg (LOG_INFO,
-            "Decode retry #%d for client uid=%d gid=%d",
-            m->retry, m->client_uid, m->client_gid);
+            "Decode retry #%d for client UID=%u GID=%u", m->retry,
+            (unsigned int) m->client_uid, (unsigned int) m->client_gid);
     }
     if (m->retry > MUNGE_SOCKET_RETRY_ATTEMPTS) {
         return (m_msg_set_err (m, EMUNGE_SOCKET,
@@ -954,8 +954,8 @@ dec_validate_auth (munge_cred_t c)
 
 unauthorized:
     return (m_msg_set_err (m, EMUNGE_CRED_UNAUTHORIZED,
-        strdupf ("Unauthorized credential for client UID=%d GID=%d",
-            m->client_uid, m->client_gid)));
+        strdupf ("Unauthorized credential for client UID=%u GID=%u",
+            (unsigned int) m->client_uid, (unsigned int) m->client_gid)));
 }
 
 
@@ -1013,8 +1013,8 @@ dec_validate_replay (munge_cred_t c)
                 && (m->retry > 0)
                 && (m->retry <= MUNGE_SOCKET_RETRY_ATTEMPTS)) {
             log_msg (LOG_NOTICE,
-                "Allowed credential replay for client UID=%d GID=%d",
-                m->client_uid, m->client_gid);
+                "Allowed credential replay for client UID=%u GID=%u",
+                (unsigned int) m->client_uid, (unsigned int) m->client_gid);
             return (0);
         }
         else {

@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -260,21 +260,21 @@ const char * munge_ctx_strerror (munge_ctx_t ctx);
  *  This string should not be freed or modified by the caller.
  */
 
-munge_err_t munge_ctx_get (munge_ctx_t ctx, munge_opt_t opt, ...);
+munge_err_t munge_ctx_get (munge_ctx_t ctx, int opt, ...);
 /*
- *  Gets the value for the option [opt] associated with the munge context
- *    [ctx], storing the result in the subsequent pointer argument.
- *    Refer to the munge_opt_t enum comments for argument types.
+ *  Gets the value for the option [opt] (of munge_opt_t) associated with the
+ *    munge context [ctx], storing the result in the subsequent pointer
+ *    argument.  Refer to the munge_opt_t enum comments for argument types.
  *    If the result is a string, that string should not be freed or modified
  *    by the caller.
  *  Returns EMUNGE_SUCCESS on success; o/w, returns the munge error number.
  */
 
-munge_err_t munge_ctx_set (munge_ctx_t ctx, munge_opt_t opt, ...);
+munge_err_t munge_ctx_set (munge_ctx_t ctx, int opt, ...);
 /*
- *  Sets the value for the option [opt] associated with the munge context
- *    [ctx], using the value of the subsequent argument.  Refer to the
- *    munge_opt_t enum comments for argument types.
+ *  Sets the value for the option [opt] (of munge_opt_t) associated with the
+ *    munge context [ctx], using the value of the subsequent argument.
+ *    Refer to the munge_opt_t enum comments for argument types.
  *  Returns EMUNGE_SUCCESS on success; o/w, returns the munge error number.
  */
 

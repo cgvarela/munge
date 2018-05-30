@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -50,24 +50,25 @@
  *  Private Constants
  *****************************************************************************/
 
-#define REPLAY_ALLOC    1024
+#define REPLAY_HASH_SIZE        65537
+#define REPLAY_NODE_ALLOC_NUM   1024
 
 
 /*****************************************************************************
  *  Private Data Types
  *****************************************************************************/
 
-union replay_key {
+union replay_node {
     struct {
-      union replay_key  *next;          /* ptr for chaining by allocator     */
-    }                    alloc;
+        union replay_node *next;        /* ptr for chaining by allocator     */
+    } alloc;
     struct {
-      time_t             t_expired;     /* time after which cred expires     */
-      unsigned char      mac[MUNGE_MINIMUM_MD_LEN];     /* msg auth code     */
-    }                    data;
+        time_t             t_expired;   /* time after which cred expires     */
+        unsigned char      mac [MUNGE_MINIMUM_MD_LEN];  /* msg auth code     */
+    } data;
 };
 
-typedef union replay_key * replay_t;
+typedef union replay_node * replay_t;
 
 
 /*****************************************************************************
@@ -84,16 +85,40 @@ static replay_t replay_alloc (void);
 
 static void replay_free (replay_t r);
 
+static void replay_drop_memory (void);
+
 
 /*****************************************************************************
  *  Private Variables
  *****************************************************************************/
 
 static hash_t replay_hash = NULL;
+/*
+ *  Hash table for tracking decoded credentials until they have expired
+ *    in order to prevent reuse.
+ */
+
+static replay_t replay_mem_list = NULL;
+/*
+ *  Singly-linked list for tracking memory allocations from replay_alloc() for
+ *    eventual de-allocation via replay_drop_memory().  Each block allocation
+ *    begins with a pointer for chaining these allocations together.  The block
+ *    is broken up into individual replay_t objects and placed on the
+ *    replay_free_list.
+ */
 
 static replay_t replay_free_list = NULL;
+/*
+ *  Singly-linked list of replay_t objects available for use.  These are
+ *    allocated via replay_alloc() in blocks of REPLAY_NODE_ALLOC_NUM.  This
+ *    bulk approach uses less RAM and CPU than allocating/de-allocating objects
+ *    individually as needed.
+ */
 
-static pthread_mutex_t replay_free_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t replay_free_list_lock = PTHREAD_MUTEX_INITIALIZER;
+/*
+ *  Mutex for protecting access to replay_mem_list and replay_free_list.
+ */
 
 
 /*****************************************************************************
@@ -142,6 +167,7 @@ replay_fini (void)
     }
     hash_destroy (replay_hash);
     replay_hash = NULL;
+    replay_drop_memory ();
     return;
 }
 
@@ -157,7 +183,7 @@ replay_insert (munge_cred_t c)
  *    Returns 1 if the credential is already present (ie, replay).
  *    Returns -1 on error with errno set.
  */
-    m_msg_t   m = c->msg;
+    m_msg_t   m;
     int       e;
     replay_t  r;
 
@@ -167,6 +193,12 @@ replay_insert (munge_cred_t c)
         errno = EPERM;
         return (-1);
     }
+    if (c == NULL) {
+        errno = EINVAL;
+        return (-1);
+    }
+    m = c->msg;
+
     if (!(r = replay_alloc ())) {
         return (-1);
     }
@@ -174,7 +206,7 @@ replay_insert (munge_cred_t c)
     assert (c->mac_len >= sizeof (r->data.mac));
     memcpy (r->data.mac, c->mac, sizeof (r->data.mac));
     /*
-     *  The replay hash key is just the replay struct itself.
+     *  The replay hash key is just the replay_t object itself.
      */
     if (hash_insert (replay_hash, r, r) != NULL) {
         return (0);
@@ -198,10 +230,9 @@ replay_remove (munge_cred_t c)
 {
 /*  Removes the credential [c] from the replay hash.
  */
-    m_msg_t           m = c->msg;
-    union replay_key  rkey_st;
-    replay_t          rkey = &rkey_st;
-    replay_t          r;
+    m_msg_t            m;
+    union replay_node  rnode;
+    replay_t           r;
 
     if (!replay_hash) {
         if (conf->got_benchmark)
@@ -209,13 +240,20 @@ replay_remove (munge_cred_t c)
         errno = EPERM;
         return (-1);
     }
+    if (c == NULL) {
+        errno = EINVAL;
+        return (-1);
+    }
+    m = c->msg;
+
     /*  Compute the cred's "hash key".
      */
-    rkey->data.t_expired = (time_t) (m->time0 + m->ttl);
-    assert (c->mac_len >= sizeof (rkey->data.mac));
-    memcpy (rkey->data.mac, c->mac, sizeof (rkey->data.mac));
+    rnode.data.t_expired = (time_t) (m->time0 + m->ttl);
+    assert (c->mac_len >= sizeof (rnode.data.mac));
+    memcpy (rnode.data.mac, c->mac, sizeof (rnode.data.mac));
 
-    if ((r = hash_remove (replay_hash, rkey))) {
+    r = hash_remove (replay_hash, &rnode);
+    if (r != NULL) {
         replay_free (r);
     }
     return (r ? 0 : -1);
@@ -268,15 +306,21 @@ replay_key_f (const replay_t r)
 static int
 replay_cmp_f (const replay_t r1, const replay_t r2)
 {
-/*  Returns zero if both replay structs [r1] and [r2] are equal.
- *    This return code may seem counter-intuitive, but it mirrors
- *    the various *cmp() functions that return zero on equality.
+/*  Returns an integer that is less than zero if [r1] is less than [r2],
+ *    equal to zero if [r1] is equal to [r2], and greater than zero
+ *    if [r1] is greater than [r2].
  */
-    if (r1->data.t_expired != r2->data.t_expired) {
+    int cmpval;
+
+    cmpval = memcmp (r1->data.mac, r2->data.mac, sizeof (r1->data.mac));
+    if (cmpval != 0) {
+        return (cmpval);
+    }
+    if (r1->data.t_expired < r2->data.t_expired) {
         return (-1);
     }
-    if (memcmp (r1->data.mac, r2->data.mac, sizeof (r2->data.mac))) {
-        return (-1);
+    if (r1->data.t_expired > r2->data.t_expired) {
+        return (1);
     }
     return (0);
 }
@@ -285,7 +329,7 @@ replay_cmp_f (const replay_t r1, const replay_t r2)
 static int
 replay_is_expired (replay_t r, void *key, time_t *pnow)
 {
-/*  Returns true if the replay struct [r] has expired based on the time [pnow].
+/*  Returns true if replay_t object [r] has expired based on the time [pnow].
  */
     if (r->data.t_expired < *pnow) {
         return (1);
@@ -297,29 +341,40 @@ replay_is_expired (replay_t r, void *key, time_t *pnow)
 static replay_t
 replay_alloc (void)
 {
-/*  Allocates a replay struct.
+/*  Allocates a replay_t object.
  *  Returns a ptr to the object, or NULL if memory allocation fails.
  */
-    int         i;
-    replay_t    r;
+    size_t    size;
+    replay_t  r;
+    int       i;
 
-    assert (REPLAY_ALLOC > 0);
+    assert (REPLAY_NODE_ALLOC_NUM > 0);
+    lsd_mutex_lock (&replay_free_list_lock);
 
-    lsd_mutex_lock (&replay_free_lock);
     if (!replay_free_list) {
-        if ((replay_free_list = malloc (REPLAY_ALLOC * sizeof (*r)))) {
-            for (i = 0; i < REPLAY_ALLOC - 1; i++)
+        size = sizeof (r) + (REPLAY_NODE_ALLOC_NUM * sizeof (*r));
+        r = malloc (size);
+
+        if (r != NULL) {
+            r->alloc.next = replay_mem_list;
+            replay_mem_list = r;
+            replay_free_list = (replay_t) ((unsigned char *) r + sizeof (r));
+
+            for (i = 0; i < REPLAY_NODE_ALLOC_NUM - 1; i++) {
                 replay_free_list[i].alloc.next = &replay_free_list[i+1];
+            }
             replay_free_list[i].alloc.next = NULL;
         }
     }
-    if ((r = replay_free_list)) {
+    if (replay_free_list) {
+        r = replay_free_list;
         replay_free_list = r->alloc.next;
+        memset (r, 0, sizeof (*r));
     }
     else {
         errno = ENOMEM;
     }
-    lsd_mutex_unlock (&replay_free_lock);
+    lsd_mutex_unlock (&replay_free_list_lock);
     return (r);
 }
 
@@ -327,13 +382,33 @@ replay_alloc (void)
 static void
 replay_free (replay_t r)
 {
-/*  De-allocates the replay struct [r].
+/*  De-allocates the replay_t object [r].
  */
     assert (r != NULL);
-
-    lsd_mutex_lock (&replay_free_lock);
+    lsd_mutex_lock (&replay_free_list_lock);
     r->alloc.next = replay_free_list;
     replay_free_list = r;
-    lsd_mutex_unlock (&replay_free_lock);
+    lsd_mutex_unlock (&replay_free_list_lock);
+    return;
+}
+
+
+static void
+replay_drop_memory (void)
+{
+/*  Frees memory that has been internally allocated for replay_t objects.
+ *  This routine should only be called via replay_fini() after replay_hash
+ *    has been destroyed.
+ */
+    replay_t r;
+
+    lsd_mutex_lock (&replay_free_list_lock);
+    while (replay_mem_list != NULL) {
+        r = replay_mem_list;
+        replay_mem_list = r->alloc.next;
+        free (r);
+    }
+    replay_free_list = NULL;
+    lsd_mutex_unlock (&replay_free_list_lock);
     return;
 }

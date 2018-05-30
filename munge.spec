@@ -1,51 +1,28 @@
 Name:		munge
-Version:	0.5.11
+Version:	0.5.13
 Release:	1%{?dist}
 
 Summary:	MUNGE authentication service
 Group:		System Environment/Daemons
 License:	GPLv3+ and LGPLv3+
-URL:		https://munge.googlecode.com/
-Requires:	%{name}-libs = %{version}-%{release}
+URL:		https://dun.github.io/munge/
+Source0:	https://github.com/dun/munge/releases/download/%{name}-%{version}/%{name}-%{version}.tar.xz
 
-%if 0%{?suse_version} >= 1100
-BuildRequires:	libbz2-devel
-BuildRequires:	libopenssl-devel
-BuildRequires:	zlib-devel
-%else
-%if 0%{?sles_version} || 0%{?suse_version}
-BuildRequires:	bzip2
-BuildRequires:	openssl-devel
-BuildRequires:	zlib-devel
-%else
 BuildRequires:	bzip2-devel
 BuildRequires:	openssl-devel
 BuildRequires:	zlib-devel
-%endif
-%endif
-BuildRoot:	%{_tmppath}/%{name}-%{version}
-
-Source0:	%{name}-%{version}.tar.bz2
-
-%if 0%{?suse_version} >= 1230
-Requires(pre):	shadow
-%else
-%if 0%{?suse_version}
-Requires(pre):	pwdutils
-%else
+BuildRequires:	systemd
+Requires:	%{name}-libs = %{version}-%{release}
 Requires(pre):	shadow-utils
-%endif
-%endif
+Requires(post): systemd
+Requires(preun): systemd
+Requires(postun): systemd
 
 %package devel
 Summary:	Headers and libraries for developing applications using MUNGE
 Group:		Development/Libraries
-Requires:	%{name}-libs = %{version}-%{release}
-%if 0%{?suse_version}
-BuildRequires:	pkg-config
-%else
+Requires:	%{name}-libs%{?_isa} = %{version}-%{release}
 BuildRequires:	pkgconfig
-%endif
 
 %package libs
 Summary:	Libraries for applications using MUNGE
@@ -69,114 +46,96 @@ A header file and static library for developing applications using MUNGE.
 A shared library for applications using MUNGE.
 
 %prep
-%setup
+%setup -q
 
 %build
 ##
 # Add the following to the rpm command line to specify 32-bit/64-bit builds:
-#   --with arch32               (build 32-bit executables & library)
-#   --with arch64               (build 64-bit executables & library)
+#   --with arch32  (build 32-bit executables & library)
+#   --with arch64  (build 64-bit executables & library)
 ##
-%configure \
-  %{?_with_arch32: --enable-arch=32} \
-  %{?_with_arch64: --enable-arch=64} \
-  --program-prefix=%{?_program_prefix:%{_program_prefix}}
-make
+%configure --disable-static \
+    %{?_with_arch32: --enable-arch=32} \
+    %{?_with_arch64: --enable-arch=64} \
+    --program-prefix=%{?_program_prefix:%{_program_prefix}}
+sed -i 's|^hardcode_libdir_flag_spec=.*|hardcode_libdir_flag_spec=""|g' libtool
+sed -i 's|^runpath_var=LD_RUN_PATH|runpath_var=DIE_RPATH_DIE|g' libtool
+make %{?_smp_mflags}
 
 %install
-rm -rf "$RPM_BUILD_ROOT"
-mkdir -p "$RPM_BUILD_ROOT"
-DESTDIR="$RPM_BUILD_ROOT" make install
-touch "$RPM_BUILD_ROOT"/%{_sysconfdir}/munge/munge.key
-touch "$RPM_BUILD_ROOT"/%{_localstatedir}/lib/munge/munge.seed
-touch "$RPM_BUILD_ROOT"/%{_localstatedir}/log/munge/munged.log
-touch "$RPM_BUILD_ROOT"/%{_localstatedir}/run/munge/munged.pid
+rm -rf %{buildroot}
+make install DESTDIR=%{buildroot}
+touch %{buildroot}/%{_sysconfdir}/munge/munge.key
+touch %{buildroot}/%{_localstatedir}/lib/munge/munge.seed
+touch %{buildroot}/%{_localstatedir}/log/munge/munged.log
+touch %{buildroot}/%{_localstatedir}/run/munge/munged.pid
+rm -f %{buildroot}/%{_sysconfdir}/sysconfig/munge
+rm -f %{buildroot}/%{_initddir}/munge
 
 %clean
-rm -rf "$RPM_BUILD_ROOT"
+rm -rf %{buildroot}
 
 %pre
-/usr/bin/getent group munge >/dev/null 2>&1 || \
-  /usr/sbin/groupadd -r munge
-/usr/bin/getent passwd munge >/dev/null 2>&1 || \
-  /usr/sbin/useradd -c "MUNGE authentication service" \
-  -d "%{_sysconfdir}/munge" -g munge -s /bin/false -r munge
+getent group munge >/dev/null || \
+    groupadd -r munge
+getent passwd munge >/dev/null || \
+    useradd -c "MUNGE authentication service" -d "%{_sysconfdir}/munge" \
+    -g munge -s /sbin/nologin -r munge
+exit 0
 
 %post
 if [ ! -e %{_sysconfdir}/munge/munge.key -a -c /dev/urandom ]; then
-  /bin/dd if=/dev/urandom bs=1 count=1024 \
-    >%{_sysconfdir}/munge/munge.key 2>/dev/null
-  /bin/chown munge:munge %{_sysconfdir}/munge/munge.key
-  /bin/chmod 0400 %{_sysconfdir}/munge/munge.key
+    dd if=/dev/urandom bs=1 count=1024 \
+        >%{_sysconfdir}/munge/munge.key 2>/dev/null
+    chown munge:munge %{_sysconfdir}/munge/munge.key
+    chmod 0400 %{_sysconfdir}/munge/munge.key
 fi
-##
-# Fix files for munge user when upgrading to 0.5.11.
-if ! /bin/egrep '^[ 	]*USER=' %{_sysconfdir}/sysconfig/munge \
-    >/dev/null 2>&1; then
-  /bin/chown munge:munge %{_sysconfdir}/munge/* %{_localstatedir}/*/munge/* \
-    %{_localstatedir}/run/munge >/dev/null 2>&1
-fi
-##
-# Fix subsys lockfile name when upgrading to 0.5.11.
-if [ -f /var/lock/subsys/munged ]; then
-  /bin/mv /var/lock/subsys/munged /var/lock/subsys/munge
-fi
-##
-if [ -x /sbin/chkconfig ]; then /sbin/chkconfig --add munge; fi
+%systemd_post munge.service
 
-%post libs
-/sbin/ldconfig %{_libdir}
+%post libs -p /sbin/ldconfig
 
 %preun
-if [ $1 -eq 0 ]; then
-  %{_sysconfdir}/init.d/munge stop >/dev/null 2>&1 || :
-  if [ -x /sbin/chkconfig ]; then /sbin/chkconfig --del munge; fi
-fi
+%systemd_preun munge.service
 
 %postun
-if [ $1 -ge 1 ]; then
-  %{_sysconfdir}/init.d/munge try-restart >/dev/null 2>&1 || :
-fi
+%systemd_postun_with_restart munge.service
 
-%postun libs
-/sbin/ldconfig %{_libdir}
+%postun libs -p /sbin/ldconfig
 
 %files
-%defattr(-,root,root,0755)
+%{!?_licensedir:%global license %doc}
+%license COPYING*
 %doc AUTHORS
-%doc COPYING
 %doc DISCLAIMER*
 %doc HISTORY
-%doc INSTALL
 %doc JARGON
+%doc KEYS
 %doc NEWS
 %doc PLATFORMS
 %doc QUICKSTART
-%doc README*
+%doc README
+%doc THANKS
 %doc doc/*
 %dir %attr(0700,munge,munge) %{_sysconfdir}/munge
 %attr(0600,munge,munge) %config(noreplace) %ghost %{_sysconfdir}/munge/munge.key
-%config(noreplace) %{_sysconfdir}/sysconfig/munge
-%{?_initddir:%{_initddir}}%{!?_initddir:%{_initrddir}}/munge
 %dir %attr(0711,munge,munge) %{_localstatedir}/lib/munge
 %attr(0600,munge,munge) %ghost %{_localstatedir}/lib/munge/munge.seed
 %dir %attr(0700,munge,munge) %{_localstatedir}/log/munge
 %attr(0640,munge,munge) %ghost %{_localstatedir}/log/munge/munged.log
-%dir %attr(0755,munge,munge) %ghost %{_localstatedir}/run/munge
+%dir %attr(0755,munge,munge) %{_localstatedir}/run/munge
 %attr(0644,munge,munge) %ghost %{_localstatedir}/run/munge/munged.pid
 %{_bindir}/*
 %{_sbindir}/*
 %{_mandir}/*[^3]/*
+%{_tmpfilesdir}/munge.conf
+%{_unitdir}/munge.service
 
 %files devel
-%defattr(-,root,root,0755)
 %{_includedir}/*
 %{_libdir}/*.la
+%{_libdir}/*.so
 %{_libdir}/pkgconfig/*.pc
 %{_mandir}/*3/*
-%{_libdir}/*.a
-%{_libdir}/*.so
 
 %files libs
-%defattr(-,root,root,0755)
 %{_libdir}/*.so.*

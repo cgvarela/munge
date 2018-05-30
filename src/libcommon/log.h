@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -47,23 +47,38 @@
 int log_open_file (FILE *fp, char *identity, int priority, int options);
 /*
  *  If [fp] is non-NULL, log messages at the [priority] level and higher
- *    (ie, below) to the specified file stream; o/w, disable logging to file.
+ *    (ie, below) to the specified file stream.
  *  If [identity] is non-NULL, its trailing "filename" component will
  *    be prepended to each message.
  *  The [options] parameter is a bitwise-OR of any "LOG_OPT_" defines
  *    specified above.
  *  Messages can be concurrently logged to syslog and one file stream.
- *  Returns 1 if the file is opened, 0 if closed, or -1 on error;
+ *  Returns 0 if the file is opened, or -1 on error;
  *    on error, the previous file stream remains open.
+ */
+
+void log_close_file (void);
+/*
+ *  Close the logging file stream (if open).
  */
 
 int log_open_syslog (char *identity, int facility);
 /*
  *  If [identity] is non-NULL, log messages to syslog at the specified
  *    [facility] (cf, syslog(3)) prepending the trailing "filename" component
- *    of [identity] to each message; o/w, disable logging to syslog.
+ *    of [identity] to each message.
  *  Messages can be concurrently logged to syslog and one file stream.
- *  Returns 1 if the syslog is opened, or 0 if closed.
+ *  Returns 0 on success, -1 on error.
+ */
+
+void log_close_syslog (void);
+/*
+ *  Closes the file descriptor used to write to the system logger (if open).
+ */
+
+void log_close_all (void);
+/*
+ *  Closes all logging devices that are open.
  */
 
 void log_set_err_pipe (int fd);

@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -36,18 +36,16 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
-
-#include "thread.h"
 #include "hash.h"
+#include "thread.h"
 
 
 /*****************************************************************************
  *  Constants
  *****************************************************************************/
 
-#define HASH_ALLOC      1024
-#define HASH_DEF_SIZE   1213
-#define HASH_MAGIC      0xDEADBEEF
+#define HASH_DEF_SIZE           1213
+#define HASH_NODE_ALLOC_NUM     1024
 
 
 /*****************************************************************************
@@ -70,9 +68,6 @@ struct hash {
 #if WITH_PTHREADS
     pthread_mutex_t     mutex;          /* mutex to protect access to hash   */
 #endif /* WITH_PTHREADS */
-#ifndef NDEBUG
-    unsigned int        magic;          /* sentinel for asserting validity   */
-#endif /* NDEBUG */
 };
 
 
@@ -89,34 +84,29 @@ static void hash_node_free (struct hash_node *node);
  *  Variables
  *****************************************************************************/
 
+static struct hash_node *hash_mem_list = NULL;
+/*
+ *  Singly-linked list for tracking memory allocations from hash_node_alloc()
+ *    for eventual de-allocation via hash_drop_memory().  Each block allocation
+ *    begins with a pointer for chaining these allocations together.  The block
+ *    is broken up into individual hash_node structs and placed on the
+ *    hash_free_list.
+ */
+
 static struct hash_node *hash_free_list = NULL;
+/*
+ *  Singly-linked list of hash_node structs available for use.  These are
+ *    allocated via hash_node_alloc() in blocks of HASH_NODE_ALLOC_NUM.  This
+ *    bulk approach uses less RAM and CPU than allocating/de-allocating objects
+ *    individually as needed.
+ */
 
 #if WITH_PTHREADS
-static pthread_mutex_t hash_free_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t hash_free_list_lock = PTHREAD_MUTEX_INITIALIZER;
+/*
+ *  Mutex for protecting access to hash_mem_list and hash_free_list.
+ */
 #endif /* WITH_PTHREADS */
-
-
-/*****************************************************************************
- *  Macros
- *****************************************************************************/
-
-#ifdef WITH_LSD_FATAL_ERROR_FUNC
-#  undef lsd_fatal_error
-   extern void lsd_fatal_error (char *file, int line, char *mesg);
-#else /* !WITH_LSD_FATAL_ERROR_FUNC */
-#  ifndef lsd_fatal_error
-#    define lsd_fatal_error(file, line, mesg) (abort ())
-#  endif /* !lsd_fatal_error */
-#endif /* !WITH_LSD_FATAL_ERROR_FUNC */
-
-#ifdef WITH_LSD_NOMEM_ERROR_FUNC
-#  undef lsd_nomem_error
-   extern void * lsd_nomem_error (char *file, int line, char *mesg);
-#else /* !WITH_LSD_NOMEM_ERROR_FUNC */
-#  ifndef lsd_nomem_error
-#    define lsd_nomem_error(file, line, mesg) (NULL)
-#  endif /* !lsd_nomem_error */
-#endif /* !WITH_LSD_NOMEM_ERROR_FUNC */
 
 
 /*****************************************************************************
@@ -136,11 +126,11 @@ hash_create (int size, hash_key_f key_f, hash_cmp_f cmp_f, hash_del_f del_f)
         size = HASH_DEF_SIZE;
     }
     if (!(h = malloc (sizeof (*h)))) {
-        return (lsd_nomem_error (__FILE__, __LINE__, "hash_create"));
+        return (NULL);
     }
     if (!(h->table = calloc (size, sizeof (struct hash_node *)))) {
         free (h);
-        return (lsd_nomem_error (__FILE__, __LINE__, "hash_create"));
+        return (NULL);
     }
     h->count = 0;
     h->size = size;
@@ -148,7 +138,6 @@ hash_create (int size, hash_key_f key_f, hash_cmp_f cmp_f, hash_del_f del_f)
     h->del_f = del_f;
     h->key_f = key_f;
     lsd_mutex_init (&h->mutex);
-    assert (h->magic = HASH_MAGIC);     /* set magic via assert abuse */
     return (h);
 }
 
@@ -164,7 +153,6 @@ hash_destroy (hash_t h)
         return;
     }
     lsd_mutex_lock (&h->mutex);
-    assert (h->magic == HASH_MAGIC);
     for (i = 0; i < h->size; i++) {
         for (p = h->table[i]; p != NULL; p = q) {
             q = p->next;
@@ -173,7 +161,6 @@ hash_destroy (hash_t h)
             hash_node_free (p);
         }
     }
-    assert (h->magic = ~HASH_MAGIC);    /* clear magic via assert abuse */
     lsd_mutex_unlock (&h->mutex);
     lsd_mutex_destroy (&h->mutex);
     free (h->table);
@@ -192,7 +179,6 @@ void hash_reset (hash_t h)
         return;
     }
     lsd_mutex_lock (&h->mutex);
-    assert (h->magic == HASH_MAGIC);
     for (i = 0; i < h->size; i++) {
         for (p = h->table[i]; p != NULL; p = q) {
             q = p->next;
@@ -215,10 +201,9 @@ hash_is_empty (hash_t h)
 
     if (!h) {
         errno = EINVAL;
-        return (0);
+        return (-1);
     }
     lsd_mutex_lock (&h->mutex);
-    assert (h->magic == HASH_MAGIC);
     n = h->count;
     lsd_mutex_unlock (&h->mutex);
     return (n == 0);
@@ -232,10 +217,9 @@ hash_count (hash_t h)
 
     if (!h) {
         errno = EINVAL;
-        return (0);
+        return (-1);
     }
     lsd_mutex_lock (&h->mutex);
-    assert (h->magic == HASH_MAGIC);
     n = h->count;
     lsd_mutex_unlock (&h->mutex);
     return (n);
@@ -246,6 +230,7 @@ void *
 hash_find (hash_t h, const void *key)
 {
     unsigned int slot;
+    int cmpval;
     struct hash_node *p;
     void *data = NULL;
 
@@ -255,13 +240,16 @@ hash_find (hash_t h, const void *key)
     }
     errno = 0;
     lsd_mutex_lock (&h->mutex);
-    assert (h->magic == HASH_MAGIC);
     slot = h->key_f (key) % h->size;
     for (p = h->table[slot]; p != NULL; p = p->next) {
-        if (!h->cmp_f (p->hkey, key)) {
-            data = p->data;
-            break;
+        cmpval = h->cmp_f (p->hkey, key);
+        if (cmpval < 0) {
+            continue;
         }
+        if (cmpval == 0) {
+            data = p->data;
+        }
+        break;
     }
     lsd_mutex_unlock (&h->mutex);
     return (data);
@@ -271,31 +259,37 @@ hash_find (hash_t h, const void *key)
 void *
 hash_insert (hash_t h, const void *key, void *data)
 {
-    struct hash_node *p;
     unsigned int slot;
+    int cmpval;
+    struct hash_node **pp;
+    struct hash_node *p;
 
     if (!h || !key || !data) {
         errno = EINVAL;
         return (NULL);
     }
     lsd_mutex_lock (&h->mutex);
-    assert (h->magic == HASH_MAGIC);
     slot = h->key_f (key) % h->size;
-    for (p = h->table[slot]; p != NULL; p = p->next) {
-        if (!h->cmp_f (p->hkey, key)) {
+    for (pp = &(h->table[slot]); (p = *pp) != NULL; pp = &(p->next)) {
+        cmpval = h->cmp_f (p->hkey, key);
+        if (cmpval < 0) {
+            continue;
+        }
+        if (cmpval == 0) {
             errno = EEXIST;
             data = NULL;
             goto end;
         }
+        break;
     }
     if (!(p = hash_node_alloc ())) {
-        data = lsd_nomem_error (__FILE__, __LINE__, "hash_insert");
+        data = NULL;
         goto end;
     }
     p->hkey = key;
     p->data = data;
-    p->next = h->table[slot];
-    h->table[slot] = p;
+    p->next = *pp;
+    *pp = p;
     h->count++;
 
 end:
@@ -307,9 +301,10 @@ end:
 void *
 hash_remove (hash_t h, const void *key)
 {
+    unsigned int slot;
+    int cmpval;
     struct hash_node **pp;
     struct hash_node *p;
-    unsigned int slot;
     void *data = NULL;
 
     if (!h || !key) {
@@ -318,16 +313,19 @@ hash_remove (hash_t h, const void *key)
     }
     errno = 0;
     lsd_mutex_lock (&h->mutex);
-    assert (h->magic == HASH_MAGIC);
     slot = h->key_f (key) % h->size;
-    for (pp = &(h->table[slot]); (p = *pp) != NULL; pp = &((*pp)->next)) {
-        if (!h->cmp_f (p->hkey, key)) {
+    for (pp = &(h->table[slot]); (p = *pp) != NULL; pp = &(p->next)) {
+        cmpval = h->cmp_f (p->hkey, key);
+        if (cmpval < 0) {
+            continue;
+        }
+        if (cmpval == 0) {
             data = p->data;
             *pp = p->next;
             hash_node_free (p);
             h->count--;
-            break;
         }
+        break;
     }
     lsd_mutex_unlock (&h->mutex);
     return (data);
@@ -347,7 +345,6 @@ hash_delete_if (hash_t h, hash_arg_f arg_f, void *arg)
         return (-1);
     }
     lsd_mutex_lock (&h->mutex);
-    assert (h->magic == HASH_MAGIC);
     for (i = 0; i < h->size; i++) {
         pp = &(h->table[i]);
         while ((p = *pp) != NULL) {
@@ -381,7 +378,6 @@ hash_for_each (hash_t h, hash_arg_f arg_f, void *arg)
         return (-1);
     }
     lsd_mutex_lock (&h->mutex);
-    assert (h->magic == HASH_MAGIC);
     for (i = 0; i < h->size; i++) {
         for (p = h->table[i]; p != NULL; p = p->next) {
             if (arg_f (p->data, p->hkey, arg) > 0) {
@@ -391,6 +387,23 @@ hash_for_each (hash_t h, hash_arg_f arg_f, void *arg)
     }
     lsd_mutex_unlock (&h->mutex);
     return (n);
+}
+
+
+void
+hash_drop_memory (void)
+{
+    struct hash_node *p;
+
+    lsd_mutex_lock (&hash_free_list_lock);
+    while (hash_mem_list != NULL) {
+        p = hash_mem_list;
+        hash_mem_list = p->next;
+        free (p);
+    }
+    hash_free_list = NULL;
+    lsd_mutex_unlock (&hash_free_list_lock);
+    return;
 }
 
 
@@ -420,29 +433,40 @@ static struct hash_node *
 hash_node_alloc (void)
 {
 /*  Allocates a hash node from the freelist.
- *  Memory is allocated in chunks of HASH_ALLOC.
  *  Returns a ptr to the object, or NULL if memory allocation fails.
  */
+    size_t size;
+    struct hash_node *p;
     int i;
-    struct hash_node *p = NULL;
 
-    assert (HASH_ALLOC > 0);
-    lsd_mutex_lock (&hash_free_lock);
+    assert (HASH_NODE_ALLOC_NUM > 0);
+    lsd_mutex_lock (&hash_free_list_lock);
+
     if (!hash_free_list) {
-        if ((hash_free_list = malloc (HASH_ALLOC * sizeof (*p)))) {
-            for (i = 0; i < HASH_ALLOC - 1; i++)
+        size = sizeof (p) + (HASH_NODE_ALLOC_NUM * sizeof (*p));
+        p = malloc (size);
+
+        if (p != NULL) {
+            p->next = hash_mem_list;
+            hash_mem_list = p;
+            hash_free_list = (struct hash_node *)
+                    ((unsigned char *) p + sizeof (p));
+
+            for (i = 0; i < HASH_NODE_ALLOC_NUM - 1; i++) {
                 hash_free_list[i].next = &hash_free_list[i+1];
+            }
             hash_free_list[i].next = NULL;
         }
     }
     if (hash_free_list) {
         p = hash_free_list;
         hash_free_list = p->next;
+        memset (p, 0, sizeof (*p));
     }
     else {
         errno = ENOMEM;
     }
-    lsd_mutex_unlock (&hash_free_lock);
+    lsd_mutex_unlock (&hash_free_list_lock);
     return (p);
 }
 
@@ -453,10 +477,9 @@ hash_node_free (struct hash_node *node)
 /*  De-allocates the object [node], returning it to the freelist.
  */
     assert (node != NULL);
-    memset (node, 0, sizeof (*node));
-    lsd_mutex_lock (&hash_free_lock);
+    lsd_mutex_lock (&hash_free_list_lock);
     node->next = hash_free_list;
     hash_free_list = node;
-    lsd_mutex_unlock (&hash_free_lock);
+    lsd_mutex_unlock (&hash_free_list_lock);
     return;
 }

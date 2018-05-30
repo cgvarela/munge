@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -36,6 +36,7 @@
 #include <string.h>
 #include <sys/types.h>
 #include <munge.h>
+#include "common.h"
 #include "ctx.h"
 #include "m_msg.h"
 #include "m_msg_client.h"
@@ -120,8 +121,8 @@ _decode_init (munge_ctx_t ctx, void **buf, int *len, uid_t *uid, gid_t *gid)
         ctx->addr.s_addr = 0;
         ctx->time0 = -1;
         ctx->time1 = -1;
-        ctx->auth_uid = -1;
-        ctx->auth_gid = -1;
+        ctx->auth_uid = UID_SENTINEL;
+        ctx->auth_gid = GID_SENTINEL;
         ctx->error_num = EMUNGE_SUCCESS;
         if (ctx->error_str) {
             free (ctx->error_str);
@@ -135,10 +136,10 @@ _decode_init (munge_ctx_t ctx, void **buf, int *len, uid_t *uid, gid_t *gid)
         *len = 0;
     }
     if (uid) {
-        *uid = -1;
+        *uid = UID_SENTINEL;
     }
     if (gid) {
-        *gid = -1;
+        *gid = GID_SENTINEL;
     }
     return;
 }

@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -34,9 +34,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <errno.h>
-#include <grp.h>
 #include <limits.h>
-#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -44,6 +42,8 @@
 #include <munge.h>
 #include "common.h"
 #include "license.h"
+#include "log.h"
+#include "query.h"
 #include "read.h"
 #include "version.h"
 
@@ -111,8 +111,6 @@ void   destroy_conf (conf_t conf);
 void   parse_cmdline (conf_t conf, int argc, char **argv);
 void   display_help (char *prog);
 void   display_strings (const char *header, munge_enum_t type);
-uid_t  query_uid (const char *user);
-gid_t  query_gid (const char *group);
 void   open_files (conf_t conf);
 int    encode_cred (conf_t conf);
 void   display_cred (conf_t conf);
@@ -125,9 +123,8 @@ void   display_cred (conf_t conf);
 int
 main (int argc, char *argv[])
 {
-    conf_t       conf;
-    int          rc = 0;
-    const char  *p;
+    conf_t      conf;
+    const char *p;
 
     if (posignal (SIGPIPE, SIG_IGN) == SIG_ERR) {
         log_err (EMUNGE_SNAFU, LOG_ERR, "Failed to ignore signal=%d", SIGPIPE);
@@ -138,18 +135,10 @@ main (int argc, char *argv[])
     open_files (conf);
 
     if (conf->string) {
-        rc = read_data_from_string (conf->string, &conf->data, &conf->dlen);
+        read_data_from_string (conf->string, &conf->data, &conf->dlen);
     }
     else if (conf->fn_in) {
-        rc = read_data_from_file (conf->fp_in, &conf->data, &conf->dlen);
-    }
-    if (rc < 0) {
-        if (errno == ENOMEM) {
-            log_errno (EMUNGE_NO_MEMORY, LOG_ERR, "Failed to read input");
-        }
-        else {
-            log_err (EMUNGE_SNAFU, LOG_ERR, "Read error");
-        }
+        read_data_from_file (conf->fp_in, &conf->data, &conf->dlen);
     }
     if (encode_cred (conf) < 0) {
         if (!(p = munge_ctx_strerror (conf->ctx))) {
@@ -162,6 +151,7 @@ main (int argc, char *argv[])
     display_cred (conf);
 
     destroy_conf (conf);
+    log_close_file ();
     exit (EMUNGE_SUCCESS);
 }
 
@@ -328,10 +318,9 @@ parse_cmdline (conf_t conf, int argc, char **argv)
                 exit (EMUNGE_SUCCESS);
                 break;
             case 'u':
-                i = query_uid (optarg);
-                if (i < 0) {
+                if (query_uid (optarg, (uid_t *) &i) < 0) {
                     log_err (EMUNGE_SNAFU, LOG_ERR,
-                            "Unrecognized user \"%s\"", optarg);
+                        "Unrecognized user \"%s\"", optarg);
                 }
                 e = munge_ctx_set (conf->ctx, MUNGE_OPT_UID_RESTRICTION, i);
                 if (e != EMUNGE_SUCCESS) {
@@ -341,18 +330,16 @@ parse_cmdline (conf_t conf, int argc, char **argv)
                 }
                 break;
             case 'U':
-                i = query_uid (optarg);
-                if (i < 0) {
+                if (query_uid (optarg, (uid_t *) &i) < 0) {
                     log_err (EMUNGE_SNAFU, LOG_ERR,
-                            "Unrecognized user \"%s\"", optarg);
+                        "Unrecognized user \"%s\"", optarg);
                 }
-                conf->cuid = i;
+                conf->cuid = (uid_t) i;
                 break;
             case 'g':
-                i = query_gid (optarg);
-                if (i < 0) {
+                if (query_gid (optarg, (gid_t *) &i) < 0) {
                     log_err (EMUNGE_SNAFU, LOG_ERR,
-                            "Unrecognized group \"%s\"", optarg);
+                        "Unrecognized group \"%s\"", optarg);
                 }
                 e = munge_ctx_set (conf->ctx, MUNGE_OPT_GID_RESTRICTION, i);
                 if (e != EMUNGE_SUCCESS) {
@@ -362,26 +349,30 @@ parse_cmdline (conf_t conf, int argc, char **argv)
                 }
                 break;
             case 'G':
-                i = query_gid (optarg);
-                if (i < 0) {
+                if (query_gid (optarg, (gid_t *) &i) < 0) {
                     log_err (EMUNGE_SNAFU, LOG_ERR,
-                            "Unrecognized group \"%s\"", optarg);
+                        "Unrecognized group \"%s\"", optarg);
                 }
-                conf->cgid = i;
+                conf->cgid = (gid_t) i;
                 break;
             case 't':
                 errno = 0;
                 l = strtol (optarg, &p, 10);
-                if ((optarg == p) || (*p != '\0')) {
+                if ((optarg == p) || (*p != '\0') || (l < -1)) {
                     log_err (EMUNGE_SNAFU, LOG_ERR,
                         "Invalid time-to-live '%s'", optarg);
                 }
-                if (((errno == ERANGE) && (l == LONG_MAX)) || (l > INT_MAX)) {
+                if ((errno == ERANGE) && (l == LONG_MAX)) {
                     log_err (EMUNGE_SNAFU, LOG_ERR,
-                        "Exceeded maximum time-to-live of %d seconds",
-                        INT_MAX);
+                        "Overflowed maximum time-to-live of %ld seconds",
+                        LONG_MAX);
                 }
-                if (l < 0) {
+                if (l > UINT_MAX) {
+                    log_err (EMUNGE_SNAFU, LOG_ERR,
+                        "Exceeded maximum time-to-live of %u seconds",
+                        UINT_MAX);
+                }
+                if (l == -1) {
                     l = MUNGE_TTL_MAXIMUM;
                 }
                 e = munge_ctx_set (conf->ctx, MUNGE_OPT_TTL, (int) l);
@@ -548,78 +539,6 @@ display_strings (const char *header, munge_enum_t type)
     }
     printf ("\n");
     return;
-}
-
-
-uid_t
-query_uid (const char *user)
-{
-/*  Returns the uid for [user], or -1 on error.
- */
-    struct passwd *pw_ptr;
-    uid_t          uid;
-    long int       luid;
-    char          *end_ptr;
-
-    if (user == NULL) {
-        errno = EINVAL;
-        return (-1);
-    }
-    pw_ptr = getpwnam (user);
-    if (pw_ptr != NULL) {
-        uid = pw_ptr->pw_uid;
-    }
-    else {
-        errno = 0;
-        luid = strtol (user, &end_ptr, 10);
-        if ((errno == ERANGE) && ((luid == LONG_MIN) || (luid == LONG_MAX))) {
-            return (-1);
-        }
-        if ((user == end_ptr) || (*end_ptr != '\0')) {
-            return (-1);
-        }
-        if ((luid < 0) || (luid > INT_MAX)) {
-            return (-1);
-        }
-        uid = (int) luid;
-    }
-    return (uid);
-}
-
-
-gid_t
-query_gid (const char *group)
-{
-/*  Returns the gid for [group], or -1 on error.
- */
-    struct group  *gr_ptr;
-    gid_t          gid;
-    long int       lgid;
-    char          *end_ptr;
-
-    if (group == NULL) {
-        errno = EINVAL;
-        return (-1);
-    }
-    gr_ptr = getgrnam (group);
-    if (gr_ptr != NULL) {
-        gid = gr_ptr->gr_gid;
-    }
-    else {
-        errno = 0;
-        lgid = strtol (group, &end_ptr, 10);
-        if ((errno == ERANGE) && ((lgid == LONG_MIN) || (lgid == LONG_MAX))) {
-            return (-1);
-        }
-        if ((group == end_ptr) || (*end_ptr != '\0')) {
-            return (-1);
-        }
-        if ((lgid < 0) || (lgid > INT_MAX)) {
-            return (-1);
-        }
-        gid = (int) lgid;
-    }
-    return (gid);
 }
 
 

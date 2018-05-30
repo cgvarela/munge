@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -116,7 +116,7 @@ _check_auth_server_dir (const char *dir, int got_force)
     }
     /*  Ensure auth server dir is secure against modification by others.
      */
-    n = path_is_secure (dir, ebuf, sizeof (ebuf));
+    n = path_is_secure (dir, ebuf, sizeof (ebuf), PATH_SECURITY_NO_FLAGS);
     if (n < 0) {
         log_err (EMUNGE_SNAFU, LOG_ERR,
             "Failed to check auth server dir \"%s\": %s", dir, ebuf);
@@ -202,7 +202,7 @@ _check_auth_client_dir (const char *dir, int got_force)
         log_err (EMUNGE_SNAFU, LOG_ERR,
             "Failed to determine dirname of auth client dir \"%s\"", dir);
     }
-    n = path_is_secure (dirdir, ebuf, sizeof (ebuf));
+    n = path_is_secure (dirdir, ebuf, sizeof (ebuf), PATH_SECURITY_NO_FLAGS);
     if (n < 0) {
         log_err (EMUNGE_SNAFU, LOG_ERR,
             "Failed to check auth client parent dir \"%s\": %s", dirdir, ebuf);

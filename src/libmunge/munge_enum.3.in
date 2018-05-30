@@ -1,11 +1,11 @@
 .\"****************************************************************************
 .\" Written by Chris Dunlap <cdunlap@llnl.gov>.
-.\" Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+.\" Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
 .\" Copyright (C) 2002-2007 The Regents of the University of California.
 .\" UCRL-CODE-155910.
 .\"
 .\" This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
-.\" For details, see <https://munge.googlecode.com/>.
+.\" For details, see <https://dun.github.io/munge/>.
 .\"
 .\" MUNGE is free software: you can redistribute it and/or modify it under
 .\" the terms of the GNU General Public License as published by the Free
@@ -40,7 +40,7 @@ munge_enum_is_valid, munge_enum_int_to_str, munge_enum_str_to_int \- MUNGE enume
 .sp
 .BI "int munge_enum_str_to_int (munge_enum_t " type ", const char *" str );
 .sp
-.B cc `pkg-config --cflags --libs munge` -o foo foo.c
+.B cc `pkg\-config \-\-cflags \-\-libs munge` \-o foo foo.c
 .fi
 
 .SH DESCRIPTION
@@ -111,7 +111,7 @@ main (int argc, char *argv[])
 @META_AUTHOR@
 
 .SH COPYRIGHT
-Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
 .br
 Copyright (C) 2002-2007 The Regents of the University of California.
 .PP
@@ -134,4 +134,4 @@ or (at your option) any later version.
 .BR munge (7),
 .BR munged (8).
 .PP
-\fBhttps://munge.googlecode.com/\fR
+\fBhttps://dun.github.io/munge/\fR

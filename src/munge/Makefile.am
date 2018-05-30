@@ -2,12 +2,12 @@
 ## Process this file with automake to produce Makefile.in.
 ##*****************************************************************************
 ## Written by Chris Dunlap <cdunlap@llnl.gov>.
-## Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+## Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
 ## Copyright (C) 2002-2007 The Regents of the University of California.
 ## UCRL-CODE-155910.
 ##
 ## This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
-## For details, see <https://munge.googlecode.com/>.
+## For details, see <https://dun.github.io/munge/>.
 ##
 ## MUNGE is free software: you can redistribute it and/or modify it under
 ## the terms of the GNU General Public License as published by the Free
@@ -39,6 +39,10 @@ bin_PROGRAMS = \
 	unmunge \
 	remunge
 
+munge_CPPFLAGS = \
+	-I$(top_srcdir)/src/common \
+	$(AM_CPPFLAGS)
+
 munge_LDADD = \
 	$(top_builddir)/src/libcommon/libcommon.la \
 	$(top_builddir)/src/libmissing/libmissing.la \
@@ -46,7 +50,17 @@ munge_LDADD = \
 
 munge_SOURCES = \
 	munge.c \
-	read.c
+	read.c \
+	read.h \
+	$(top_srcdir)/src/common/query.c \
+	$(top_srcdir)/src/common/query.h \
+	$(top_srcdir)/src/common/xgetgr.c \
+	$(top_srcdir)/src/common/xgetgr.h \
+	$(top_srcdir)/src/common/xgetpw.c \
+	$(top_srcdir)/src/common/xgetpw.h
+
+unmunge_CPPFLAGS = \
+	$(AM_CPPFLAGS)
 
 unmunge_LDADD = \
 	$(top_builddir)/src/libcommon/libcommon.la \
@@ -55,7 +69,13 @@ unmunge_LDADD = \
 
 unmunge_SOURCES = \
 	unmunge.c \
-	read.c
+	read.c \
+	read.h
+
+remunge_CPPFLAGS = \
+	-DWITH_PTHREADS \
+	-I$(top_srcdir)/src/common \
+	$(AM_CPPFLAGS)
 
 remunge_LDADD = \
 	$(top_builddir)/src/libcommon/libcommon.la \
@@ -64,7 +84,13 @@ remunge_LDADD = \
 	$(LIBPTHREAD)
 
 remunge_SOURCES = \
-	remunge.c
+	remunge.c \
+	$(top_srcdir)/src/common/query.c \
+	$(top_srcdir)/src/common/query.h \
+	$(top_srcdir)/src/common/xgetgr.c \
+	$(top_srcdir)/src/common/xgetgr.h \
+	$(top_srcdir)/src/common/xgetpw.c \
+	$(top_srcdir)/src/common/xgetpw.h
 
 man_MANS = \
 	munge.1 \

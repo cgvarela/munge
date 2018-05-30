@@ -1,11 +1,11 @@
 .\"****************************************************************************
 .\" Written by Chris Dunlap <cdunlap@llnl.gov>.
-.\" Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+.\" Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
 .\" Copyright (C) 2002-2007 The Regents of the University of California.
 .\" UCRL-CODE-155910.
 .\"
 .\" This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
-.\" For details, see <https://munge.googlecode.com/>.
+.\" For details, see <https://dun.github.io/munge/>.
 .\"
 .\" MUNGE is free software: you can redistribute it and/or modify it under
 .\" the terms of the GNU General Public License as published by the Free
@@ -54,10 +54,11 @@ the identity of the local client, and then forward this information on to
 remote hosts via trusted rsh connections.  But this presents several new
 problems.  First, there is no portable API for determining the identity of
 a client over a Unix domain socket.  Second, rsh connections must originate
-from a reserved port; the limited number of reserved ports available on a
-given host directly limits scalability.  Third, root privileges are required
-in order to bind to a reserved port.  Finally, the remote daemons have no
-means of determining whether the client identity is authentic.
+from a reserved port; the limited number of reserved ports available on
+a given host directly limits scalability.  Third, root privileges are
+required in order to bind to a reserved port.  Finally, the remote daemons
+have no means of determining whether the client identity is authentic.
+MUNGE solves all of these problems.
 
 .SH USAGE
 A process creates a credential by requesting one from the local MUNGE
@@ -90,7 +91,7 @@ over virtually any transport.
 @META_AUTHOR@
 
 .SH COPYRIGHT
-Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
 .br
 Copyright (C) 2002-2007 The Regents of the University of California.
 .PP
@@ -113,4 +114,4 @@ or (at your option) any later version.
 .BR munge_enum (3),
 .BR munged (8).
 .PP
-\fBhttps://munge.googlecode.com/\fR
+\fBhttps://dun.github.io/munge/\fR

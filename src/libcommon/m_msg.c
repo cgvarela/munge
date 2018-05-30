@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -84,14 +84,10 @@ m_msg_create (m_msg_t *pm)
 
     assert (pm != NULL);
 
-    if (!(m = malloc (sizeof (*m)))) {
+    if (!(m = calloc (1, sizeof (*m)))) {
         *pm = NULL;
         return (EMUNGE_NO_MEMORY);
     }
-    /*  Initialize ints to 0, ptrs to NULL.
-     */
-    memset (m, 0, sizeof (*m));
-
     m->sd = -1;
     m->type = MUNGE_MSG_UNDEF;
 

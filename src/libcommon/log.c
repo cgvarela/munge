@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -97,12 +97,8 @@ log_open_file (FILE *fp, char *identity, int priority, int options)
     char *p;
 
     if (!fp) {
-        if (log_ctx.fp) {
-            (void) fclose (log_ctx.fp);
-        }
-        log_ctx.fp = NULL;
-        log_ctx.got_init = 1;
-        return (0);
+        errno = EINVAL;
+        return (-1);
     }
     if (ferror (fp)) {
         return (-1);
@@ -121,7 +117,18 @@ log_open_file (FILE *fp, char *identity, int priority, int options)
     log_ctx.priority = (priority > 0) ? priority : 0;
     log_ctx.options = options;
     log_ctx.got_init = 1;
-    return (1);
+    return (0);
+}
+
+
+void
+log_close_file (void)
+{
+    if (log_ctx.fp) {
+        (void) fclose (log_ctx.fp);
+        log_ctx.fp = NULL;
+    }
+    return;
 }
 
 
@@ -130,19 +137,37 @@ log_open_syslog (char *identity, int facility)
 {
     char *p;
 
-    if (identity) {
-        if ((p = strrchr (identity, '/'))) {
-            identity = p + 1;
-        }
-        openlog (identity, LOG_NDELAY | LOG_PID, facility);
-        log_ctx.got_syslog = 1;
+    if (!identity) {
+        errno = EINVAL;
+        return (-1);
     }
-    else {
+    if ((p = strrchr (identity, '/'))) {
+        identity = p + 1;
+    }
+    openlog (identity, LOG_NDELAY | LOG_PID, facility);
+    log_ctx.got_syslog = 1;
+    log_ctx.got_init = 1;
+    return (0);
+}
+
+
+void
+log_close_syslog (void)
+{
+    if (log_ctx.got_syslog) {
         closelog ();
         log_ctx.got_syslog = 0;
     }
-    log_ctx.got_init = 1;
-    return (log_ctx.got_syslog);
+    return;
+}
+
+
+void
+log_close_all (void)
+{
+    log_close_file ();
+    log_close_syslog ();
+    return;
 }
 
 

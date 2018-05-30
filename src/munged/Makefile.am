@@ -2,12 +2,12 @@
 ## Process this file with automake to produce Makefile.in.
 ##*****************************************************************************
 ## Written by Chris Dunlap <cdunlap@llnl.gov>.
-## Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+## Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
 ## Copyright (C) 2002-2007 The Regents of the University of California.
 ## UCRL-CODE-155910.
 ##
 ## This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
-## For details, see <https://munge.googlecode.com/>.
+## For details, see <https://dun.github.io/munge/>.
 ##
 ## MUNGE is free software: you can redistribute it and/or modify it under
 ## the terms of the GNU General Public License as published by the Free
@@ -39,8 +39,12 @@ sbin_PROGRAMS = \
 
 munged_CFLAGS = \
 	$(AM_CFLAGS) \
-	-DWITH_PTHREADS \
 	$(CRYPTO_CFLAGS)
+
+munged_CPPFLAGS = \
+	-DWITH_PTHREADS \
+	-I$(top_srcdir)/src/common \
+	$(AM_CPPFLAGS)
 
 munged_LDADD = \
 	$(top_builddir)/src/libcommon/libcommon.la \
@@ -52,6 +56,7 @@ munged_LDADD = \
 	$(CRYPTO_LIBS)
 
 munged_SOURCES = \
+	munged.c \
 	auth_recv.c \
 	auth_recv.h \
 	base64.c \
@@ -74,6 +79,8 @@ munged_SOURCES = \
 	hash.h \
 	job.c \
 	job.h \
+	lock.c \
+	lock.h \
 	mac.c \
 	mac.h \
 	md.c \
@@ -90,13 +97,14 @@ munged_SOURCES = \
 	timer.h \
 	work.c \
 	work.h \
-	xgetgrent.c \
-	xgetgrent.h \
-	xgetpwnam.c \
-	xgetpwnam.h \
 	zip.c \
 	zip.h \
-	munged.c
+	$(top_srcdir)/src/common/query.c \
+	$(top_srcdir)/src/common/query.h \
+	$(top_srcdir)/src/common/xgetgr.c \
+	$(top_srcdir)/src/common/xgetgr.h \
+	$(top_srcdir)/src/common/xgetpw.c \
+	$(top_srcdir)/src/common/xgetpw.h
 
 man_MANS = \
 	munged.8

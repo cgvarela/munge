@@ -2,12 +2,12 @@
 # Process this file with autoconf to produce a configure script.
 #******************************************************************************
 # Written by Chris Dunlap <cdunlap@llnl.gov>.
-# Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+# Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
 # Copyright (C) 2002-2007 The Regents of the University of California.
 # UCRL-CODE-155910.
 #
 # This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
-# For details, see <https://munge.googlecode.com/>.
+# For details, see <https://dun.github.io/munge/>.
 #
 # MUNGE is free software: you can redistribute it and/or modify it under
 # the terms of the GNU General Public License as published by the Free
@@ -34,6 +34,7 @@ AC_INIT
 X_AC_META
 AC_CONFIG_AUX_DIR([config])
 AC_CONFIG_SRCDIR([src/libmunge/munge.h])
+AC_REQUIRE_AUX_FILE([tap-driver.sh])
 X_AC_CANONICAL
 X_AC_HUMOR
 X_AC_EXPAND_INSTALL_DIRS
@@ -41,7 +42,7 @@ X_AC_EXPAND_INSTALL_DIRS
 ##
 # Automake support.
 ##
-AM_INIT_AUTOMAKE([$PACKAGE], [$VERSION], [check-news dist-bzip2 gnu no-define])
+AM_INIT_AUTOMAKE([$PACKAGE], [$VERSION])
 AC_CONFIG_HEADERS([config/config.h])
 AM_MAINTAINER_MODE
 
@@ -67,28 +68,8 @@ AC_SEARCH_LIBS(socket, socket)
 AM_PATH_LIBGCRYPT
 X_AC_PATH_OPENSSL
 X_AC_SELECT_CRYPTO_LIB
-
-##
-# Checks for OpenSSL.
-##
-if test "$CRYPTO_PKG" = "openssl"; then
-  ac_save_CFLAGS="$CFLAGS"
-  ac_save_LIBS="$LIBS"
-  CFLAGS="$CFLAGS $OPENSSL_CFLAGS"
-  LIBS="$LIBS $OPENSSL_LIBS"
-  AC_CHECK_FUNCS( \
-    ERR_error_string_n \
-    EVP_CipherInit_ex \
-    EVP_DigestInit_ex \
-    EVP_aes_128_cbc \
-    EVP_aes_256_cbc \
-    EVP_sha256 \
-    EVP_sha512 \
-    HMAC_Init_ex \
-  )
-  AC_CHECK_TYPES(CRYPTO_dynlock, [], [], [#include <openssl/crypto.h>])
-  CFLAGS="$ac_save_CFLAGS"
-  LIBS="$ac_save_LIBS"
+if test "${CRYPTO_PKG}" = "openssl"; then
+  X_AC_CHECK_OPENSSL
 fi
 
 ##
@@ -98,6 +79,7 @@ AC_HEADER_STDC
 AC_CHECK_HEADERS( \
   bzlib.h \
   standards.h \
+  sys/random.h \
   zlib.h \
 )
 
@@ -114,6 +96,8 @@ AC_CHECK_TYPES(socklen_t, [], [], [#include <sys/types.h>
 # Checks for library functions.
 ##
 AC_CHECK_FUNCS( \
+  getentropy \
+  getrandom \
   localtime_r \
   mlockall \
   sysconf \
@@ -124,6 +108,7 @@ AC_REPLACE_FUNCS( \
   strlcpy \
 )
 X_AC_GETGRENT
+X_AC_GETGRNAM
 X_AC_GETPWNAM
 
 ##
@@ -138,14 +123,17 @@ X_AC_DARWIN
 X_AC_SELECT_AUTH_METHOD
 
 ##
+# Checks for customizations.
+##
+X_AC_WITH_MUNGE_SOCKET
+
+##
 # Epilogue.
 ##
 AC_CONFIG_FILES( \
   Makefile \
   src/Makefile \
   src/etc/Makefile \
-  src/etc/munge.init \
-  src/etc/munge.pc \
   src/libcommon/Makefile \
   src/libcommon/munge.7 \
   src/libmissing/Makefile \
@@ -159,5 +147,6 @@ AC_CONFIG_FILES( \
   src/munge/unmunge.1 \
   src/munged/Makefile \
   src/munged/munged.8 \
+  t/Makefile \
 )
 AC_OUTPUT

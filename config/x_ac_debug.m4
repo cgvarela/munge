@@ -37,13 +37,14 @@ AC_DEFUN([X_AC_DEBUG], [
         [test -z "AS_VAR_GET(ac_env_CFLAGS_set)"],
         [CFLAGS=]
       )
+      [DEBUGCFLAGS="$DEBUGCFLAGS -O0"]
       AS_IF(
         [test "AS_VAR_GET(ac_cv_prog_cc_g)" = yes],
         [DEBUGCFLAGS="$DEBUGCFLAGS -g"]
       )
       AS_IF(
         [test "AS_VAR_GET(GCC)" = yes],
-        [DEBUGCFLAGS="$DEBUGCFLAGS -Wall -pedantic"]
+        [DEBUGCFLAGS="$DEBUGCFLAGS -Wall -pedantic -std=c99"]
       )
       AM_CFLAGS="$AM_CFLAGS \$(DEBUGCFLAGS)"
       AC_SUBST([AM_CFLAGS])

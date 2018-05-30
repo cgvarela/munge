@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -124,54 +124,6 @@ int fd_is_nonblocking (int fd);
 /*
  *  Returns >0 if the file descriptor [fd] is set for nonblocking I/O,
  *     0 if not set, or -1 on error (with errno set appropriately).
- */
-
-int fd_get_read_lock (int fd);
-/*
- *  Obtains a read lock on the file specified by [fd].
- *  Returns 0 on success, or -1 if prevented from obtaining the lock.
- */
-
-int fd_get_readw_lock (int fd);
-/*
- *  Obtains a read lock on the file specified by [fd],
- *    blocking until one becomes available.
- *  Returns 0 on success, or -1 on error.
- */
-
-int fd_get_write_lock (int fd);
-/*
- *  Obtains a write lock on the file specified by [fd].
- *  Returns 0 on success, or -1 if prevented from obtaining the lock.
- */
-
-int fd_get_writew_lock (int fd);
-/*
- *  Obtains a write lock on the file specified by [fd],
- *    blocking until one becomes available.
- *  Returns 0 on success, or -1 on error.
- */
-
-int fd_release_lock (int fd);
-/*
- *  Releases a lock held on the file specified by [fd].
- *  Returns 0 on success, or -1 on error.
- */
-
-pid_t fd_is_read_lock_blocked (int fd);
-/*
- *  Checks to see if a lock exists on [fd] that would block a request for a
- *    read-lock (ie, if a write-lock is already being held on the file).
- *  Returns the pid of the process holding the lock, 0 if no lock exists,
- *    or -1 on error.
- */
-
-pid_t fd_is_write_lock_blocked (int fd);
-/*
- *  Checks to see if a lock exists on [fd] that would block a request for a
- *    write-lock (ie, if any lock is already being held on the file).
- *  Returns the pid of the process holding the lock, 0 if no lock exists,
- *    or -1 on error.
  */
 
 

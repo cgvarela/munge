@@ -1,11 +1,11 @@
 /*****************************************************************************
  *  Written by Chris Dunlap <cdunlap@llnl.gov>.
- *  Copyright (C) 2007-2013 Lawrence Livermore National Security, LLC.
+ *  Copyright (C) 2007-2018 Lawrence Livermore National Security, LLC.
  *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  UCRL-CODE-155910.
  *
  *  This file is part of the MUNGE Uid 'N' Gid Emporium (MUNGE).
- *  For details, see <https://munge.googlecode.com/>.
+ *  For details, see <https://dun.github.io/munge/>.
  *
  *  MUNGE is free software: you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
@@ -47,10 +47,12 @@ struct conf {
     unsigned        got_force:1;        /* flag for FORCE option             */
     unsigned        got_foreground:1;   /* flag for FOREGROUND option        */
     unsigned        got_group_stat:1;   /* flag for gids stat'ing /etc/group */
+    unsigned        got_stop:1;         /* flag for stopping daemon          */
     unsigned        got_mlockall:1;     /* flag for locking all memory pages */
     unsigned        got_root_auth:1;    /* flag if root can decode any cred  */
     unsigned        got_socket_retry:1; /* flag for allowing decode retries  */
     unsigned        got_syslog:1;       /* flag if logging to syslog instead */
+    unsigned        got_verbose:1;      /* flag for being verbose            */
     munge_cipher_t  def_cipher;         /* default cipher type               */
     munge_zip_t     def_zip;            /* default compression type          */
     munge_mac_t     def_mac;            /* default message auth code type    */
@@ -93,7 +95,7 @@ extern conf_t conf;                     /* defined in conf.c                 */
 
 conf_t create_conf (void);
 
-void destroy_conf (conf_t conf);
+void destroy_conf (conf_t conf, int do_unlink);
 
 void parse_cmdline (conf_t conf, int argc, char **argv);
 
